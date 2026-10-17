@@ -1,15 +1,15 @@
 # Changelog
 
-## Unreleased — Phase 3A / v0.3.0 candidate
+## Unreleased — Phase 4A prototype
 
-- Add speed-controlled playback at 0.50×–2.00× using interpolation.
-- Add reverse playback while keeping the source clip unchanged.
-- Add optional repeated playback / looping.
-- Introduce Winamp-inspired dark/green UI, rendered with off-screen `M5Canvas` to avoid full-screen redraw flashing.
-- Preserve Phase 2 record/play hardware buttons, I²C pin mapping, and microphone/speaker calls.
-- Use user-supplied PlatformIO configuration (COM9).
-- **Pending hardware build and test; not an official release yet.**
+- Introduce Home, Chomp, Tracks (placeholder), and Settings navigation.
+- Make Key2 the global Back button and move playback to scroll click.
+- Add signed varispeed -2.0x to +2.0x; 0 pauses, negative speeds reverse.
+- Stream short PCM playback chunks to apply wheel speed changes during playback.
+- Add battery indicator and persistent volume / brightness settings.
+- Add green/yellow/red spectrum level thresholds and purple reverse accents.
+- Retain full-frame canvas-based flicker-free rendering and hold-A recording.
 
-## v0.2.0 — Voice recording & playback
+## Previous prototypes
 
-- Tested on physical device: build, flash, screen, record, play, Unit Scroll and overwrite functionality passed.
+See `docs/phase3a-effects.md` and `docs/phase3b-visualization.md` for earlier stages.
