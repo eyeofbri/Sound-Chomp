@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 4A.1: queued, gapless-oriented live varispeed playback.
+// Sound-Chomp Phase 4A.2: refined controls and retro UI atop queued audio.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -13,11 +13,19 @@ constexpr int kGroveSda=9,kGroveScl=10;
 constexpr uint32_t kSampleRate=16000, kPollMs=30, kFrameMs=75;
 constexpr size_t kMaxSamples=kSampleRate*8, kRecordChunk=512, kPlayChunk=512, kPlayBuffers=3;
 constexpr int kBands=18,kAnalysisWindow=256,kWaveBins=204;
-constexpr uint32_t kLongPressMs=650;
-const float kSpeeds[]={-2.0f,-1.75f,-1.5f,-1.25f,-1.0f,-0.75f,-0.50f,0.0f,0.50f,0.75f,1.0f,1.25f,1.5f,1.75f,2.0f};
-constexpr int kSpeedCount=sizeof(kSpeeds)/sizeof(kSpeeds[0]);
-int speedIndex=10; // +1x
-float speed(){return kSpeeds[speedIndex];}
+constexpr uint32_t kLongPressMs=650, kRecordHoldMs=300;
+// Fine steps around conversational speed, coarser steps at extremes.
+constexpr float kMagnitude[]={0.25f,0.30f,0.35f,0.40f,0.45f,0.50f,0.55f,0.60f,0.65f,0.70f,0.75f,0.80f,0.85f,0.90f,0.95f,1.00f,1.10f,1.20f,1.30f,1.40f,1.50f,1.60f,1.70f,1.80f,1.90f,2.00f,2.25f,2.50f,2.75f,3.00f};
+constexpr int kMagnitudeCount=sizeof(kMagnitude)/sizeof(kMagnitude[0]);
+constexpr int kSpeedCount=2*kMagnitudeCount+1;
+int speedIndex=kMagnitudeCount+15; // +1x
+bool invertedReverse=false,autoPlay=false;
+float speed(){
+  if(speedIndex==kMagnitudeCount)return 0;
+  if(speedIndex>kMagnitudeCount)return kMagnitude[speedIndex-kMagnitudeCount-1];
+  const int nearZeroIndex=kMagnitudeCount-1-speedIndex;
+  return -kMagnitude[invertedReverse?(kMagnitudeCount-1-nearZeroIndex):nearZeroIndex];
+}
 int16_t *samples=nullptr,*playChunks[kPlayBuffers]={};
 size_t captured=0;
 uint8_t waveform[kWaveBins]={};
@@ -29,6 +37,7 @@ int32_t wheelLast=0;
 uint32_t lastPoll=0,lastProbe=0,lastFrame=0,pressedAt=0,lastBatteryPoll=0;
 uint8_t volumePct=65,brightnessPct=80,batteryPct=0;
 bool charging=false,loopAudio=false,settingsEditing=false;
+bool aWasDown=false,aHoldStarted=false;uint32_t aPressedAt=0;
 int homeSelection=0,settingsSelection=0;
 enum class Page{Home,Chomp,Tracks,Settings};
 enum class State{Idle,Recording,Playing,Error};
@@ -87,15 +96,31 @@ void updateBattery(){
   batteryPct=uint8_t(constrain(int(M5.Power.getBatteryLevel()),0,100));
   charging=M5.Power.isCharging();
 }
+void drawTeeth(int x,int y){
+  // Original 12x11 two-jaw pixel glyph; deliberately distinct from reference artwork.
+  const uint16_t toothColor=LIME;
+  canvas.drawFastHLine(x,y,12,toothColor);
+  canvas.drawFastHLine(x,y+10,12,toothColor);
+  for(int i=0;i<4;i++){
+    int tx=x+1+i*3;
+    canvas.fillRect(tx,y+1,2,2,toothColor);
+    canvas.fillRect(tx,y+8,2,2,toothColor);
+    canvas.drawPixel(tx,y+3,toothColor);
+    canvas.drawPixel(tx+1,y+7,toothColor);
+  }
+}
 void drawHeader(const char* title){
   int w=canvas.width();
   canvas.fillRect(2,2,w-4,17,PANEL);
   canvas.setTextSize(1);canvas.setTextColor(LIME,PANEL);canvas.setCursor(7,7);canvas.print(title);
-  canvas.setTextColor(WHITE,PANEL);canvas.setCursor(w-57,7);
-  canvas.printf("%s%u%%",charging?"+":"",unsigned(batteryPct));
-  int batteryX=w-18;
-  canvas.drawRect(batteryX,7,13,7,WHITE);
-  canvas.fillRect(batteryX+2,9,(batteryPct*9)/100,3,batteryPct<20?RED:GREEN);
+  if(strcmp(title,"SOUND-CHOMP")==0)drawTeeth(87,4);
+  int batteryX=w-22;
+  canvas.drawRect(batteryX,7,15,8,WHITE);
+  canvas.fillRect(batteryX-3,9,3,4,WHITE); // battery terminal on left
+  canvas.fillRect(batteryX+2,9,(batteryPct*11)/100,4,batteryPct<20?RED:GREEN);
+  canvas.setTextColor(WHITE,PANEL);canvas.setCursor(batteryX-31,7);
+  canvas.printf("%u%%",unsigned(batteryPct));
+  if(charging)canvas.drawPixel(batteryX+5,6,YELLOW);
 }
 void drawSpectrum(int left,int top,int width,int height){
   const int stride=max(3,width/kBands);
@@ -114,10 +139,14 @@ void drawSpectrum(int left,int top,int width,int height){
 void drawChomp(){
   int w=canvas.width(),h=canvas.height();
   const char* status=state==State::Recording?"REC":state==State::Playing?"PLAY":state==State::Error?"ERROR":"READY";
-  canvas.setTextColor(state==State::Recording?RED:accent(),BG);
-  canvas.setTextSize(2);canvas.setCursor(7,23);canvas.print(status);
-  canvas.setTextColor(accent(),BG);canvas.setCursor(w-90,23);
-  if(speed()==0)canvas.print("PAUSE");else canvas.printf("%+.2fx",speed());
+  if(state==State::Recording){
+    canvas.fillRect(5,21,w-10,23,RED);
+    canvas.setTextColor(TFT_BLACK,RED);canvas.setTextSize(2);canvas.setCursor(12,24);canvas.print("RECORDING");
+  }else{
+    canvas.setTextColor(accent(),BG);canvas.setTextSize(2);canvas.setCursor(7,23);canvas.print(status);
+    canvas.setTextColor(accent(),BG);canvas.setCursor(w-91,23);
+    if(speed()==0)canvas.print("PAUSE");else canvas.printf("%+.2fx",speed());
+  }
   canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(8,45);
   canvas.printf("%s  LOOP:%s  %.1fs",speed()<0?"REV":"FWD",loopAudio?"ON":"OFF",float(captured)/kSampleRate);
   int left=8,top=61,vw=w-16,vh=max(15,h-87);
@@ -137,8 +166,8 @@ void drawChomp(){
   }else{
     canvas.setTextColor(MUTED,PANEL);canvas.setCursor(left+12,top+vh/2-3);canvas.print("HOLD A TO RECORD");
   }
-  canvas.setTextColor(LIME,BG);canvas.setCursor(7,h-17);canvas.print("A:REC  WHEEL:RATE  CLICK:PLAY");
-  canvas.setTextColor(MUTED,BG);canvas.setCursor(7,h-8);canvas.print("LONG CLICK:LOOP    B:HOME");
+  canvas.setTextColor(LIME,BG);canvas.setCursor(7,h-17);canvas.print("A:TAP PLAY / HOLD REC");
+  canvas.setTextColor(MUTED,BG);canvas.setCursor(7,h-8);canvas.print("WHEEL:RATE CLICK:PLAY B:BACK");
   if(state==State::Error){canvas.setTextColor(RED,BG);canvas.setCursor(7,h-27);canvas.print(errorText);}
 }
 void drawHome(){
@@ -164,20 +193,24 @@ void drawTracks(){
 }
 void drawSettings(){
   int w=canvas.width(),h=canvas.height();
-  const char* labels[]={"VOLUME","BRIGHTNESS"};
-  for(int i=0;i<2;i++){
-    int y=30+i*33;bool sel=settingsSelection==i;
-    canvas.fillRect(8,y,w-16,29,sel?0x32A5:PANEL);
-    canvas.drawRect(8,y,w-16,29,sel?(settingsEditing?YELLOW:LIME):TRIM);
-    canvas.setTextColor(sel?LIME:WHITE,sel?0x32A5:PANEL);
-    canvas.setCursor(15,y+5);canvas.print(labels[i]);
-    canvas.setCursor(w-48,y+5);canvas.printf("%3u%%",unsigned(i==0?volumePct:brightnessPct));
-    canvas.fillRect(15,y+18,(w-30)*int(i==0?volumePct:brightnessPct)/100,4,sel?LIME:GREEN);
+  const char* labels[]={"VOLUME","BRIGHT","REVERSE MAP","AUTO PLAY"};
+  for(int i=0;i<4;i++){
+    int y=22+i*24;bool sel=settingsSelection==i;
+    uint16_t surface=sel?0x32A5:PANEL;
+    canvas.fillRect(7,y,w-14,22,surface);
+    canvas.drawRect(7,y,w-14,22,sel?(settingsEditing?YELLOW:LIME):TRIM);
+    canvas.setTextColor(sel?LIME:WHITE,surface);canvas.setTextSize(1);
+    canvas.setCursor(13,y+7);canvas.print(labels[i]);
+    canvas.setCursor(w-75,y+7);
+    if(i==0)canvas.printf("%u%%",unsigned(volumePct));
+    else if(i==1)canvas.printf("%u%%",unsigned(brightnessPct));
+    else if(i==2)canvas.print(invertedReverse?"INVERTED":"NORMAL");
+    else canvas.print(autoPlay?"ON":"OFF");
   }
-  canvas.setTextColor(WHITE,BG);canvas.setCursor(8,h-27);
-  canvas.print(settingsEditing?"TURN:ADJUST CLICK:SAVE":"TURN:SELECT CLICK:EDIT");
-  canvas.setTextColor(MUTED,BG);canvas.setCursor(8,h-11);canvas.print("B:BACK  SAVED AUTOMATICALLY");
+  canvas.setTextColor(WHITE,BG);canvas.setCursor(7,h-14);
+  canvas.print(settingsEditing?"TURN:CHANGE CLICK:DONE":"TURN:SELECT CLICK:EDIT");
 }
+
 void draw(bool force=false){
   if(!canvasReady)return;
   if(!force&&millis()-lastFrame<kFrameMs)return;
@@ -196,8 +229,10 @@ void handleWheel(int delta){
   }else if(page==Page::Settings){
     if(settingsEditing){
       if(settingsSelection==0){volumePct=uint8_t(constrain(int(volumePct)+delta*5,0,100));setVolume();}
-      else{brightnessPct=uint8_t(constrain(int(brightnessPct)+delta*5,10,100));M5.Display.setBrightness(uint8_t(int(brightnessPct)*255/100));}
-    }else settingsSelection=constrain(settingsSelection+delta,0,1);
+      else if(settingsSelection==1){brightnessPct=uint8_t(constrain(int(brightnessPct)+delta*5,10,100));M5.Display.setBrightness(uint8_t(int(brightnessPct)*255/100));}
+      else if(settingsSelection==2 && delta!=0)invertedReverse=delta>0;
+      else if(settingsSelection==3 && delta!=0)autoPlay=delta>0;
+    }else settingsSelection=constrain(settingsSelection+delta,0,3);
   }
 }
 void updateScroll(){
@@ -225,9 +260,10 @@ void updateScroll(){
 }
 void service(){M5.update();updateScroll();}
 void clearEvents(){scrollShort=false;scrollLong=false;}
-void saveSettings(){prefs.putUChar("volume",volumePct);prefs.putUChar("bright",brightnessPct);}
-void backHome(){if(page==Page::Settings)saveSettings();settingsEditing=false;page=Page::Home;clearEvents();draw(true);}
+void saveSettings(){prefs.putUChar("volume",volumePct);prefs.putUChar("bright",brightnessPct);prefs.putBool("revInvert",invertedReverse);prefs.putBool("autoPlay",autoPlay);}
+void backHome(){aWasDown=false;aHoldStarted=false;if(page==Page::Settings)saveSettings();settingsEditing=false;page=Page::Home;clearEvents();draw(true);}
 void openSelection(){
+  aWasDown=M5.BtnA.isPressed();aHoldStarted=true;
   page=homeSelection==0?Page::Chomp:homeSelection==1?Page::Tracks:Page::Settings;
   clearEvents();draw(true);
 }
@@ -261,12 +297,18 @@ void playClip(){
   setVolume();state=State::Playing;setStateLed();clearEvents();draw(true);
   double cursor=speed()<0?double(captured-1):0.0;
   bool interrupted=false,sourceExhausted=false;
+  bool playADown=M5.BtnA.isPressed();uint32_t playAPressed=millis();
   unsigned queued=0;
   size_t chunksMade=0;
   constexpr uint8_t kChannel=0;
   while(!interrupted&&state==State::Playing){
     service();
     if(M5.BtnB.wasPressed()){interrupted=true;backHome();break;}
+    // Tapping A during playback stops playback, just like wheel click.
+    const bool buttonDown=M5.BtnA.isPressed();
+    if(buttonDown&&!playADown)playAPressed=millis();
+    if(!buttonDown&&playADown&&millis()-playAPressed<kRecordHoldMs){interrupted=true;break;}
+    playADown=buttonDown;
     if(scrollShort){scrollShort=false;interrupted=true;break;}
     if(scrollLong){scrollLong=false;loopAudio=!loopAudio;}
 
@@ -320,6 +362,7 @@ void setup(){
   prefs.begin("soundchomp",false);
   volumePct=uint8_t(constrain(int(prefs.getUChar("volume",65)),0,100));
   brightnessPct=uint8_t(constrain(int(prefs.getUChar("bright",80)),10,100));
+  invertedReverse=prefs.getBool("revInvert",false);autoPlay=prefs.getBool("autoPlay",false);
   M5.Display.setBrightness(uint8_t(int(brightnessPct)*255/100));
   samples=static_cast<int16_t*>(heap_caps_malloc(kMaxSamples*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   for(auto& b:playChunks)b=static_cast<int16_t*>(heap_caps_malloc(kPlayChunk*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
@@ -329,7 +372,7 @@ void setup(){
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateBattery();
-  Serial.println("Sound-Chomp Phase 4A.1 - queued live speed audio");draw(true);
+  Serial.println("Sound-Chomp Phase 4A.2 - one-button audio controls");draw(true);
 }
 void loop(){
   service();
@@ -338,8 +381,19 @@ void loop(){
     if(M5.BtnA.wasPressed()||scrollShort){openSelection();}
     scrollLong=false;
   }else if(page==Page::Chomp){
-    if(state==State::Idle&&M5.BtnA.wasPressed())recordClip();
-    else if(state==State::Idle&&scrollShort){scrollShort=false;playClip();}
+    // Distinguish tap from hold. A release after recording is never a tap.
+    const bool down=M5.BtnA.isPressed();
+    if(down&&!aWasDown){aPressedAt=millis();aHoldStarted=false;}
+    if(down&&!aHoldStarted&&millis()-aPressedAt>=kRecordHoldMs){
+      aHoldStarted=true;
+      recordClip(); // blocking capture loop; release stops it
+      if(autoPlay&&state==State::Idle&&captured>0)playClip();
+    }
+    if(!down&&aWasDown&&!aHoldStarted&&millis()-aPressedAt<kRecordHoldMs&&state==State::Idle){
+      playClip();
+    }
+    aWasDown=down;
+    if(state==State::Idle&&scrollShort){scrollShort=false;playClip();}
     if(scrollLong){loopAudio=!loopAudio;scrollLong=false;}
   }else if(page==Page::Tracks){
     if(M5.BtnA.wasPressed()||scrollShort){scrollShort=false;page=Page::Chomp;draw(true);}

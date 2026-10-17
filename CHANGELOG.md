@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased — Phase 4A.1 playback quality patch
+## Unreleased — Phase 4A.2 controls and UI
+
+- Tap Button A to play/stop; hold for 300 ms to record and release to finish.
+- Optional automatic playback immediately after recording.
+- Extend forward/reverse speed to 3x with finer steps near 1x.
+- Choose conventional or inverted reverse speed mapping in Settings.
+- Bright red RECORDING banner replaces speed display during capture.
+- Improve battery terminal and percentage placement and add original pixel teeth glyph.
+- Preserve Phase 4A.1 queued audio buffering without changing its playback algorithm.
+
+## v0.3.0 — Playback effects and interactive UI
+
+- Hardware verified: playback effects, smooth audio buffering, navigation, waveform and spectrum visualization, and preferences.
+
+## Phase 4A.1 playback quality patch
 
 - Queue adjacent playback chunks instead of waiting for each one to finish.
 - Use three rotating audio buffers to avoid overwriting samples still in use.

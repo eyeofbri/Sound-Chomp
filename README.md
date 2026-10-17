@@ -22,3 +22,16 @@ An open-source pocket-sized Yak Bak-inspired voice recorder and sound toy for th
 3. Build with PlatformIO, then upload and test. Check `docs/phase4a-navigation.md` for controls and the hardware test checklist.
 
 Prior phase guides remain in `docs/`. MIT licensed; see `LICENSE` in the existing repository.
+
+
+## Phase 4A.2 experimental changes
+
+- **Chomp:** tap A to play/stop; hold A ~300 ms to record and release to stop.
+- Scroll click also plays/stops; long scroll click toggles looping.
+- Scroll rotation controls playback speed from -3x to +3x; zero pauses.
+- Settings include Volume, Brightness, Reverse Map (Normal/Inverted), and Auto Play.
+- Auto Play automatically starts the last recording after releasing A; off by default.
+- Inverted reverse mapping means further into negative wheel positions slows reverse playback; transitioning through zero into reverse jumps initially to fast reverse.
+- Tracks is still a placeholder; recordings reside in RAM.
+
+**Verification:** This package has not been compiled or physically tested. Preserve your validated Phase 4A.1 commit for rollback.
