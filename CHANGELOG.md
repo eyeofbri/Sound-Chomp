@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased — Phase 2 prototype
-- Add 8-second single-clip 16 kHz / 16-bit mono recording into PSRAM.
-- Add onboard speaker playback and audio-state control.
-- Add Unit Scroll selection/press controls and A/B button shortcuts.
-- Add Phase 2 audio test instructions; audio verification pending.
+## Unreleased — Phase 3A / v0.3.0 candidate
 
-## v0.1.0 — Hardware Foundation
-- PlatformIO/M5Unified StickS3 hardware test.
-- Unit Scroll connection, wheel position/button and LED feedback.
-- Physical board testing, upload, and serial verified by project maintainer.
+- Add speed-controlled playback at 0.50×–2.00× using interpolation.
+- Add reverse playback while keeping the source clip unchanged.
+- Add optional repeated playback / looping.
+- Introduce Winamp-inspired dark/green UI, rendered with off-screen `M5Canvas` to avoid full-screen redraw flashing.
+- Preserve Phase 2 record/play hardware buttons, I²C pin mapping, and microphone/speaker calls.
+- Use user-supplied PlatformIO configuration (COM9).
+- **Pending hardware build and test; not an official release yet.**
+
+## v0.2.0 — Voice recording & playback
+
+- Tested on physical device: build, flash, screen, record, play, Unit Scroll and overwrite functionality passed.

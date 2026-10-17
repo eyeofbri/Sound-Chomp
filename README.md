@@ -1,38 +1,42 @@
 # Sound-Chomp
 
-An open-source, pocket-sized voice recorder and sound toy inspired by the classic Yak Bak, built for **M5StickS3 + M5Stack Unit Scroll**.
+Open-source Yak Bak-inspired voice recorder/sound toy for **M5StickS3 + M5Stack Unit Scroll**.
 
-> **Current development: Phase 2 audio prototype.** Phase 1 hardware, flashing, Unit Scroll rotation/button and serial were verified on physical hardware. **Phase 2 audio firmware is not yet hardware-tested.**
+> **Phase 3A prototype (`v0.3.0` candidate):** Playback speed, reverse, loop, and flicker-free Winamp-inspired display. **Not yet compiled or tested on hardware.** Phase 2 recording/playback tests passed 7/7 on real hardware.
 
-## Phase 2 controls
+## Phase 3A controls
 
 | Action | Input |
 |---|---|
-| Choose Record / Play | Rotate Unit Scroll |
-| Activate selection | Press Unit Scroll |
-| Start new recording | M5StickS3 button A |
-| Stop recording | Unit Scroll press or button A |
-| Play existing clip | M5StickS3 button B |
-| Stop playback | Unit Scroll press or button B |
+| Record / stop recording | Button A |
+| Play / stop playback | Button B |
+| Change speed | Rotate Unit Scroll (0.50×–2.00×) |
+| Toggle forward/reverse | Short press scroll wheel **while idle** |
+| Toggle loop | Hold scroll wheel ~0.65 seconds |
+| Stop playback | Short press scroll wheel or Button B |
+| Stop recording | Scroll press or Button A |
 
-Recording replaces the previous clip. Maximum **8 seconds** of **16 kHz / 16-bit mono PCM**, stored in PSRAM (not persistent after restart). Scroll LED: blue=ready, red=recording, green=playing. No audio processing effects yet.
+The effects are applied to a separate PSRAM output buffer; the original recorded clip remains unchanged. Speed changes during playback apply on the next loop cycle or playback start. At the 0.50× setting an 8-second recording takes approximately 16 seconds to play. Changing speed also changes pitch, just like classic variable-speed tape playback.
 
-## Quick start
+## Installation
 
-1. Clone `https://github.com/eyeofbri/Sound-Chomp.git` and open the repository directory in VS Code + PlatformIO.
-2. Connect the Unit Scroll U186 using the included HY2.0 cable and connect the StickS3 over USB-C.
-3. Run **PlatformIO Build**, then **Upload**, then **Monitor** (115200 baud).
-4. Record a short test phrase (button A), stop with button A, and play with button B.
-5. Also test selection and activation through the scroll wheel. Watch serial output for errors.
+1. Clone <https://github.com/eyeofbri/Sound-Chomp> and open it with VS Code + PlatformIO.
+2. Copy this package into your clone, preserving your existing LICENSE and Git history.
+3. The included `platformio.ini` is the user's provided local configuration with `COM9` specified; contributors should change or remove those port lines.
+4. Build, upload, and open the 115200-baud serial monitor.
+5. Follow [the Phase 3A test plan](docs/phase3a-effects.md).
 
-Details: [getting started](docs/getting-started.md), [hardware](docs/hardware.md), [Phase 2 testing](docs/phase2-audio.md).
+## Display
 
-## Status and roadmap
+The UI is inspired by the **classic Winamp default skin**: dark beveled frame, neon-green digital text and small level bars. To prevent visible flashing, each full frame is drawn to an off-screen `M5Canvas` sprite and pushed to the display in one operation. The bars are **decorative** in this prototype, not a real-time audio analyzer.
 
-- Phase 1: hardware foundation verified on physical device.
-- Phase 2: single-clip record/playback prototype (awaiting device testing).
-- Later: pitch/reverse playback, clip management, and refined user interface.
+## Roadmap
 
-## Contributing & license
+- Phase 1: hardware/Unit Scroll validation ✅
+- Phase 2: 8-second 16 kHz mono RAM record/playback ✅ (7/7 on device)
+- Phase 3A: variable speed, reverse, loop, Winamp-inspired non-flashing display — hardware validation pending
+- Phase 3B: playback/control refinements, responsive UI, optional visualization
 
-Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under MIT; see [LICENSE](LICENSE). Yak Bak belongs to its respective owners and this project is independent.
+## License
+
+MIT — see `LICENSE` in the original repository. Independent of the owners of the Yak Bak and Winamp trademarks.
