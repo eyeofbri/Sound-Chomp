@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 4A: navigation, signed speed and chunk-streamed live varispeed.
+// Sound-Chomp Phase 4A.1: queued, gapless-oriented live varispeed playback.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -11,14 +11,14 @@ namespace {
 constexpr uint8_t kScrollAddress=0x40, kEncoderReg=0x10, kButtonReg=0x20, kRgbReg=0x30;
 constexpr int kGroveSda=9,kGroveScl=10;
 constexpr uint32_t kSampleRate=16000, kPollMs=30, kFrameMs=75;
-constexpr size_t kMaxSamples=kSampleRate*8, kRecordChunk=512, kPlayChunk=384;
+constexpr size_t kMaxSamples=kSampleRate*8, kRecordChunk=512, kPlayChunk=512, kPlayBuffers=3;
 constexpr int kBands=18,kAnalysisWindow=256,kWaveBins=204;
 constexpr uint32_t kLongPressMs=650;
 const float kSpeeds[]={-2.0f,-1.75f,-1.5f,-1.25f,-1.0f,-0.75f,-0.50f,0.0f,0.50f,0.75f,1.0f,1.25f,1.5f,1.75f,2.0f};
 constexpr int kSpeedCount=sizeof(kSpeeds)/sizeof(kSpeeds[0]);
 int speedIndex=10; // +1x
 float speed(){return kSpeeds[speedIndex];}
-int16_t *samples=nullptr,*playChunk=nullptr;
+int16_t *samples=nullptr,*playChunks[kPlayBuffers]={};
 size_t captured=0;
 uint8_t waveform[kWaveBins]={};
 float spectrum[kBands]={};
@@ -249,53 +249,64 @@ void recordClip(){
   setStateLed();clearEvents();draw(true);
   Serial.printf("Captured %.2fs\n",double(captured)/kSampleRate);
 }
-// Render a small buffer from the ORIGINAL recording at the current signed rate.
-// Playback is chunk-streamed instead of pre-rendering a whole effect: wheel changes
-// are applied at the next chunk boundary (~24ms of PCM + speaker queue latency).
-// At zero, pause without losing the source position. On direction switch the
-// source cursor continues from its current location in the opposite direction.
+// Generate output from the original PCM at the selected signed speed.
+// IMPORTANT: keep a queue of audio ahead of the speaker, and do not modify
+// a buffer until at least two other buffers have been submitted. M5Unified
+// documents three rotating buffers as a safe strategy for generated audio.
 void playClip(){
-  if(!captured||!samples||!playChunk)return;
+  if(!captured||!samples)return;
+  for(auto* b:playChunks)if(!b)return;
   M5.Mic.end();
   if(!M5.Speaker.begin()){state=State::Error;errorText="SPEAKER BEGIN FAILED";return;}
   setVolume();state=State::Playing;setStateLed();clearEvents();draw(true);
   double cursor=speed()<0?double(captured-1):0.0;
-  bool interrupted=false;
+  bool interrupted=false,sourceExhausted=false;
+  unsigned queued=0;
+  size_t chunksMade=0;
+  constexpr uint8_t kChannel=0;
   while(!interrupted&&state==State::Playing){
     service();
     if(M5.BtnB.wasPressed()){interrupted=true;backHome();break;}
     if(scrollShort){scrollShort=false;interrupted=true;break;}
-    if(scrollLong){scrollLong=false;loopAudio=!loopAudio;Serial.printf("Loop: %s\n",loopAudio?"ON":"OFF");}
-    float rate=speed();
-    if(rate==0){draw();delay(5);continue;}
-    size_t count=0;
-    for(;count<kPlayChunk;count++){
-      if(cursor<0||cursor>=double(captured)){
-        if(!loopAudio)break;
-        cursor=cursor<0?double(captured-1):0.0;
+    if(scrollLong){scrollLong=false;loopAudio=!loopAudio;}
+
+    // Only submit when the speaker has a free queue slot. The two-slot
+    // queue keeps the following segment ready before the first finishes.
+    // A third backing buffer prevents overwriting speaker-owned PCM.
+    const size_t occupied=M5.Speaker.isPlaying(kChannel);
+    const float rate=speed();
+    if(!sourceExhausted && rate!=0 && occupied<2){
+      int16_t* output=playChunks[queued%kPlayBuffers];
+      size_t count=0;
+      for(;count<kPlayChunk;count++){
+        if(cursor<0 || cursor>=double(captured)){
+          if(!loopAudio){sourceExhausted=true;break;}
+          cursor=cursor<0?double(captured-1):0.0;
+        }
+        const size_t left=size_t(cursor);
+        const size_t right=min(left+1,captured-1);
+        const float frac=float(cursor-double(left));
+        const float v=samples[left]*(1.0f-frac)+samples[right]*frac;
+        output[count]=int16_t(v);
+        cursor+=double(rate);
       }
-      size_t left=size_t(cursor);
-      size_t right=min(left+1,captured-1);
-      float frac=float(cursor-double(left));
-      float v=samples[left]*(1.0f-frac)+samples[right]*frac;
-      playChunk[count]=int16_t(v);
-      cursor+=double(rate);
+      if(count){
+        if(!M5.Speaker.playRaw(output,count,kSampleRate,false,1,kChannel,false)){
+          state=State::Error;errorText="SPEAKER PLAY FAILED";break;
+        }
+        ++queued;
+        // The Goertzel analysis can be expensive; do it on only every
+        // fourth chunk, rather than on every 32ms playback chunk.
+        if((chunksMade++%4)==0 && count>=kAnalysisWindow){
+          analyze(output,count,count/2);
+        }
+      }
     }
-    if(count==0)break;
-    // Wait for prior chunk to finish before reusing memory. Inputs remain serviced.
-    while(M5.Speaker.isPlaying()){
-      service();
-      if(M5.BtnB.wasPressed()){interrupted=true;backHome();break;}
-      if(scrollShort){scrollShort=false;interrupted=true;break;}
-      if(scrollLong){scrollLong=false;loopAudio=!loopAudio;}
-      draw();delay(1);
-    }
-    if(interrupted)break;
-    if(!M5.Speaker.playRaw(playChunk,count,kSampleRate,false,1,0)){
-      state=State::Error;errorText="SPEAKER PLAY FAILED";break;
-    }
-    if(count>=kAnalysisWindow)analyze(playChunk,count,count/2);
+    if(sourceExhausted && !M5.Speaker.isPlaying(kChannel))break;
+    // Keep button/scroll responsiveness without doing heavy UI work
+    // between every generated PCM segment. draw() is frame-limited.
     draw();
+    delay(1);
   }
   M5.Speaker.stop();M5.Speaker.end();
   if(state!=State::Error)state=State::Idle;
@@ -311,13 +322,14 @@ void setup(){
   brightnessPct=uint8_t(constrain(int(prefs.getUChar("bright",80)),10,100));
   M5.Display.setBrightness(uint8_t(int(brightnessPct)*255/100));
   samples=static_cast<int16_t*>(heap_caps_malloc(kMaxSamples*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
-  playChunk=static_cast<int16_t*>(heap_caps_malloc(kPlayChunk*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
-  if(!samples||!playChunk){state=State::Error;errorText="PSRAM ALLOCATION FAILED";Serial.println(errorText);}
+  for(auto& b:playChunks)b=static_cast<int16_t*>(heap_caps_malloc(kPlayChunk*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+  bool audioBuffersReady=samples!=nullptr;for(auto* b:playChunks)audioBuffersReady=audioBuffersReady&&(b!=nullptr);
+  if(!audioBuffersReady){state=State::Error;errorText="PSRAM ALLOCATION FAILED";Serial.println(errorText);}
   canvas.setColorDepth(16);
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateBattery();
-  Serial.println("Sound-Chomp Phase 4A - menu and live speed");draw(true);
+  Serial.println("Sound-Chomp Phase 4A.1 - queued live speed audio");draw(true);
 }
 void loop(){
   service();

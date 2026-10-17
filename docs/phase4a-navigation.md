@@ -42,3 +42,14 @@ Boundary condition: reaching either end stops playback unless loop is enabled. T
 - Keep a copy of working Phase 3B until testing completes.
 - This source package is uncompiled and not hardware verified.
 - Embedded serial monitor is configured for COM9 in platformio.ini (local Windows setup); contributors can remove the two COM9 lines for automatic port detection.
+
+
+### Phase 4A.1 playback quality test
+
+1. Record a 4–8 second phrase, then play it at +1.00x. Confirm that speech is as clear as Phase 3B.
+2. Try +0.50x, +1.50x and −1.00x; confirm live changes still work without resets.
+3. Loop a clip while adjusting speed and direction. Check for unintended silences and sharp clicks.
+4. Confirm the spectrum and menus remain responsive and flicker-free.
+5. If audio still skips, note whether the skips occur at regular intervals (~32ms), only when the display redraws, or only when turning the wheel.
+
+This patch has not been compiled or tested on real hardware.

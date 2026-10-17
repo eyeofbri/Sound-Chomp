@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased — Phase 4A prototype
+## Unreleased — Phase 4A.1 playback quality patch
+
+- Queue adjacent playback chunks instead of waiting for each one to finish.
+- Use three rotating audio buffers to avoid overwriting samples still in use.
+- Reduce spectrum analysis workload during playback.
+- Preserve live signed-speed control, navigation, settings, and existing UI.
+- Pending hardware verification of 1.00x clarity and live wheel responsiveness.
+
+## Phase 4A prototype
 
 - Introduce Home, Chomp, Tracks (placeholder), and Settings navigation.
 - Make Key2 the global Back button and move playback to scroll click.
