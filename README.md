@@ -1,34 +1,38 @@
 # Sound-Chomp
 
-An open-source, pocket-sized voice recorder and sound toy inspired by the classic Yak Bak, built with the **M5StickS3** and **M5Stack Unit Scroll**.
+An open-source, pocket-sized voice recorder and sound toy inspired by the classic Yak Bak, built for **M5StickS3 + M5Stack Unit Scroll**.
 
-> **Status: Phase 1 — hardware smoke test (unverified on physical hardware).** Audio recording is not implemented yet.
+> **Current development: Phase 2 audio prototype.** Phase 1 hardware, flashing, Unit Scroll rotation/button and serial were verified on physical hardware. **Phase 2 audio firmware is not yet hardware-tested.**
 
-## Hardware
-- M5Stack **StickS3** (not StickC / StickC Plus)
-- M5Stack **Unit Scroll U186** (I2C, address `0x40`)
-- Included four-wire Grove cable and USB-C data cable
+## Phase 2 controls
+
+| Action | Input |
+|---|---|
+| Choose Record / Play | Rotate Unit Scroll |
+| Activate selection | Press Unit Scroll |
+| Start new recording | M5StickS3 button A |
+| Stop recording | Unit Scroll press or button A |
+| Play existing clip | M5StickS3 button B |
+| Stop playback | Unit Scroll press or button B |
+
+Recording replaces the previous clip. Maximum **8 seconds** of **16 kHz / 16-bit mono PCM**, stored in PSRAM (not persistent after restart). Scroll LED: blue=ready, red=recording, green=playing. No audio processing effects yet.
 
 ## Quick start
-1. Install VS Code and the **PlatformIO IDE** extension.
-2. Clone this repository: `git clone https://github.com/eyeofbri/Sound-Chomp.git`.
-3. Open the cloned folder in VS Code.
-4. Connect Unit Scroll to the StickS3 HY2.0-4P port and connect USB-C.
-5. In PlatformIO, select **Build**, then **Upload**, then **Monitor** (115200 baud).
-6. Verify screen, both hardware buttons, scroll movement and scroll-button state. If the wheel isn't detected, see [troubleshooting](docs/getting-started.md).
 
-See [getting started](docs/getting-started.md) and [hardware](docs/hardware.md).
+1. Clone `https://github.com/eyeofbri/Sound-Chomp.git` and open the repository directory in VS Code + PlatformIO.
+2. Connect the Unit Scroll U186 using the included HY2.0 cable and connect the StickS3 over USB-C.
+3. Run **PlatformIO Build**, then **Upload**, then **Monitor** (115200 baud).
+4. Record a short test phrase (button A), stop with button A, and play with button B.
+5. Also test selection and activation through the scroll wheel. Watch serial output for errors.
 
-## Project roadmap
-- **0.1.x**: PlatformIO setup, display/buttons, wheel and LED test
-- **0.2.x**: Microphone recording and speaker playback experiments
-- **0.3.x**: Playback controls using Unit Scroll
-- Later: clip management, audio effects, and polished interface
+Details: [getting started](docs/getting-started.md), [hardware](docs/hardware.md), [Phase 2 testing](docs/phase2-audio.md).
 
-Roadmap items are tentative. Version `0.1.0` should only be tagged **after** a successful hardware test.
+## Status and roadmap
 
-## Contributing
-Issues and pull requests are welcome. This is an early-stage project; see [CONTRIBUTING.md](CONTRIBUTING.md).
+- Phase 1: hardware foundation verified on physical device.
+- Phase 2: single-clip record/playback prototype (awaiting device testing).
+- Later: pitch/reverse playback, clip management, and refined user interface.
 
-## License
-MIT — see [LICENSE](LICENSE). The Yak Bak name belongs to its respective owners; this is an independent fan-inspired project.
+## Contributing & license
+
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Licensed under MIT; see [LICENSE](LICENSE). Yak Bak belongs to its respective owners and this project is independent.

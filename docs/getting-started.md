@@ -23,3 +23,12 @@ pio device monitor -b 115200
 - **Serial output missing:** reopen the monitor at 115200 after uploading.
 
 This initial project hasn't been physically verified. Please report your build log and on-device results before publishing `v0.1.0`.
+
+## Windows build dependency troubleshooting
+If you see `ModuleNotFoundError: No module named intelhex`, in PowerShell run:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" -m pip install intelhex
+```
+
+Rebuild. If needed, clean the PlatformIO project and rebuild.

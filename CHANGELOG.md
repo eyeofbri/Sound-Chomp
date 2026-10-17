@@ -1,8 +1,12 @@
 # Changelog
 
-## Unreleased
-- Added initial StickS3 PlatformIO configuration and hardware smoke-test firmware.
-- Added Unit Scroll I2C detection, wheel/button reads, LED feedback, display status, and serial logs.
-- Added documentation and a GitHub Actions build workflow.
+## Unreleased — Phase 2 prototype
+- Add 8-second single-clip 16 kHz / 16-bit mono recording into PSRAM.
+- Add onboard speaker playback and audio-state control.
+- Add Unit Scroll selection/press controls and A/B button shortcuts.
+- Add Phase 2 audio test instructions; audio verification pending.
 
-No tagged release yet. Tag `v0.1.0` after first successful hardware validation.
+## v0.1.0 — Hardware Foundation
+- PlatformIO/M5Unified StickS3 hardware test.
+- Unit Scroll connection, wheel position/button and LED feedback.
+- Physical board testing, upload, and serial verified by project maintainer.
