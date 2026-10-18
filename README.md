@@ -1,3 +1,5 @@
+> **Phase 4C development prototype:** Four RAM-backed tracks now save to LittleFS and reload after reboot. See [persistent storage notes](docs/phase4c-persistent-tracks.md) for important first-run formatting warnings and limitations.
+
 # Sound-Chomp
 
 An open-source pocket-sized Yak Bak-inspired voice recorder and sound toy for the **M5StickS3** + **M5Stack Unit Scroll**. Developed with PlatformIO and Arduino.

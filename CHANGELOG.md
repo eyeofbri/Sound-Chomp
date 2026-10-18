@@ -1,3 +1,11 @@
+## Unreleased — Phase 4C Persistent Tracks
+
+- Save four PCM recordings to LittleFS and restore at startup.
+- Remove saved audio when a track is deleted.
+- Add file integrity validation and logging for storage failures.
+- Shrink the empty recording prompt and widen timer character spacing.
+- Keep the triple-buffer speaker playback engine unchanged.
+
 ## Unreleased — Phase 4A.5
 
 - Targeted reel animation, icon, banner, timer and waveform prompt corrections.

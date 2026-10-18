@@ -1,9 +1,10 @@
-// Sound-Chomp Phase 4B: multi-track RAM slots and player UI corrections.
+// Sound-Chomp Phase 4C: LittleFS persistent tracks and player legibility fixes.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
 #include <Wire.h>
 #include <Preferences.h>
+#include <LittleFS.h>
 #include <esp_heap_caps.h>
 #include <math.h>
 
@@ -31,6 +32,76 @@ struct Track {int16_t* pcm=nullptr;size_t length=0;};
 Track tracks[kTrackCount];
 int activeTrack=0,trackSelection=0;
 bool trackDeleteConfirm=false;
+bool storageReady=false;
+bool storageSaveFailed=false;
+// A small binary header rejects truncated, incompatible and corrupt clips.
+struct ClipHeader { uint32_t magic, version, sampleRate, sampleCount, checksum; };
+constexpr uint32_t kClipMagic=0x504D4853; // "SHMP" marker
+constexpr uint32_t kClipVersion=1;
+static_assert(sizeof(ClipHeader)==20,"Unexpected clip header layout");
+void trackPath(int which, char* out, size_t n, bool temporary=false){
+  snprintf(out,n,"/chomp%02d.%s",which+1,temporary?"tmp":"pcm");
+}
+uint32_t clipChecksum(const int16_t* data,size_t n){
+  // FNV-1a over each PCM byte; inexpensive and endian-consistent on ESP32.
+  uint32_t hash=2166136261u;
+  const uint8_t* b=reinterpret_cast<const uint8_t*>(data);
+  for(size_t i=0;i<n*sizeof(int16_t);++i){hash^=b[i];hash*=16777619u;}
+  return hash;
+}
+bool writeAll(File& f,const uint8_t* src,size_t n){
+  while(n){size_t written=f.write(src,min(n,size_t(4096)));if(!written)return false;src+=written;n-=written;}
+  return true;
+}
+bool saveTrack(int which){
+  if(!storageReady||which<0||which>=kTrackCount||!tracks[which].pcm)return false;
+  char dest[24],tmp[24];trackPath(which,dest,sizeof dest);trackPath(which,tmp,sizeof tmp,true);
+  LittleFS.remove(tmp);
+  File f=LittleFS.open(tmp,"w");
+  if(!f){Serial.println("Storage: cannot create temporary clip");return false;}
+  const Track& t=tracks[which];
+  ClipHeader hdr{kClipMagic,kClipVersion,kSampleRate,uint32_t(t.length),clipChecksum(t.pcm,t.length)};
+  bool ok=writeAll(f,reinterpret_cast<const uint8_t*>(&hdr),sizeof hdr);
+  if(ok&&t.length)ok=writeAll(f,reinterpret_cast<const uint8_t*>(t.pcm),t.length*sizeof(int16_t));
+  f.flush();f.close();
+  File verify=LittleFS.open(tmp,"r");
+  ok=ok&&verify&&verify.size()==sizeof hdr+t.length*sizeof(int16_t);
+  if(verify)verify.close();
+  if(!ok){LittleFS.remove(tmp);Serial.println("Storage: failed to write clip");return false;}
+  // Keep the prior recording until the replacement was written completely.
+  // Filesystem rename over an existing destination varies by implementation.
+  LittleFS.remove(dest);
+  if(!LittleFS.rename(tmp,dest)){Serial.println("Storage: rename failed");return false;}
+  Serial.printf("Saved track %d, %u samples\n",which+1,unsigned(t.length));
+  return true;
+}
+void deleteSavedTrack(int which){
+  if(!storageReady)return;char dest[24],tmp[24];
+  trackPath(which,dest,sizeof dest);trackPath(which,tmp,sizeof tmp,true);
+  LittleFS.remove(dest);LittleFS.remove(tmp);
+}
+void loadTracks(){
+  if(!storageReady)return;
+  for(int i=0;i<kTrackCount;i++){
+    char path[24];trackPath(i,path,sizeof path);
+    File f=LittleFS.open(path,"r");
+    if(!f)continue;
+    ClipHeader hdr{};
+    const bool headerOK=f.read(reinterpret_cast<uint8_t*>(&hdr),sizeof hdr)==sizeof hdr &&
+       hdr.magic==kClipMagic && hdr.version==kClipVersion &&
+       hdr.sampleRate==kSampleRate && hdr.sampleCount<=kMaxSamples &&
+       f.size()==sizeof hdr+size_t(hdr.sampleCount)*sizeof(int16_t) && tracks[i].pcm;
+    bool ok=headerOK;
+    if(ok){
+      const size_t bytes=size_t(hdr.sampleCount)*sizeof(int16_t);
+      ok=f.read(reinterpret_cast<uint8_t*>(tracks[i].pcm),bytes)==bytes;
+      if(ok)ok=clipChecksum(tracks[i].pcm,hdr.sampleCount)==hdr.checksum;
+    }
+    tracks[i].length=ok?hdr.sampleCount:0;f.close();
+    Serial.printf("Load track %d: %s\n",i+1,ok?"OK":"invalid / skipped");
+  }
+}
+
 int16_t *samples=nullptr,*playChunks[kPlayBuffers]={};
 size_t captured=0;
 void commitActiveTrack(){tracks[activeTrack].length=captured;}
@@ -217,7 +288,7 @@ void drawTimeLabel(int right,int y,const char* str){
   // Not scaling the entire font avoids blowing up the transport row.
   static const uint8_t segments[10]={0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f};
   int width=0;
-  for(const char* t=str;*t;t++)width+=(*t>='0'&&*t<='9')?7:(*t=='.'?3:6);
+  for(const char* t=str;*t;t++)width+=(*t>='0'&&*t<='9')?8:(*t=='.'?4:7);
   int x=right-width;
   for(const char* t=str;*t;t++){
     const char ch=*t;
@@ -230,17 +301,19 @@ void drawTimeLabel(int right,int y,const char* str){
       if(seg&0x10)canvas.drawFastVLine(x,y+5,3,WHITE);
       if(seg&0x20)canvas.drawFastVLine(x,y+1,3,WHITE);
       if(seg&0x40)canvas.drawFastHLine(x+1,y+4,4,WHITE);
-      x+=7;
-    }else if(ch=='.'){canvas.fillRect(x,y+7,2,2,WHITE);x+=3;}
-    else{canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(x,y+1);canvas.print(ch);x+=6;}
+      x+=8;
+    }else if(ch=='.'){canvas.fillRect(x,y+7,2,2,WHITE);x+=4;}
+    else{canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(x,y+1);canvas.print(ch);x+=7;}
   }
 }
 void drawWaveform(int left,int top,int width,int height){
   const int cy=top+height/2;
   canvas.drawFastHLine(left,cy,width,TRIM);
   if(captured==0){
-    canvas.setTextColor(MUTED,PANEL);canvas.setCursor(left+9,cy-3);
-    canvas.print("A: TAP PLAY / HOLD REC");return;
+    canvas.setTextSize(1);canvas.setTextColor(MUTED,PANEL);
+    const char* prompt="TAP A: PLAY  HOLD A: REC";
+    canvas.setCursor(left+max(2,(width-int(strlen(prompt))*6)/2),cy-4);
+    canvas.print(prompt);return;
   }
   // At 1x the clip occupies the full viewport. Faster shrinks, slower
   // stretches and is clipped. Scroll-window follows the playback cursor.
@@ -492,6 +565,10 @@ void recordClip(){
     captured+=count;analyze(samples,captured,captured-count/2);service();draw();
   }
   M5.Mic.end();commitActiveTrack();updateWaveform();if(resetSpeedAfterRecord)resetSpeed();if(state!=State::Error)state=State::Idle;
+  if(state==State::Idle){
+    if(storageReady){storageSaveFailed=!saveTrack(activeTrack);if(storageSaveFailed)Serial.println("WARNING: Clip only in RAM; flash save failed");}
+    else Serial.println("WARNING: flash not mounted; recording only in RAM");
+  }
   setStateLed();clearEvents();draw(true);
   Serial.printf("Captured %.2fs\n",double(captured)/kSampleRate);
 }
@@ -630,14 +707,20 @@ void setup(){
     t.length=0;
   }
   samples=tracks[0].pcm;
+  // The existing 8 MB partition scheme reserves the final ~1.5 MB for a filesystem.
+  // WARNING: format-on-failure initializes an unformatted filesystem on first use.
+  // It can erase pre-existing incompatible filesystem data in that partition.
+  storageReady=LittleFS.begin(true);
+  if(storageReady){loadTracks();captured=tracks[0].length;}
+  else Serial.println("LittleFS mount failed: RAM-only operation; no persistent storage");
   for(auto& b:playChunks)b=static_cast<int16_t*>(heap_caps_malloc(kPlayChunk*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   bool audioBuffersReady=true;for(const auto& t:tracks)audioBuffersReady=audioBuffersReady&&(t.pcm!=nullptr);for(auto* b:playChunks)audioBuffersReady=audioBuffersReady&&(b!=nullptr);
   if(!audioBuffersReady){state=State::Error;errorText="PSRAM ALLOCATION FAILED";Serial.println(errorText);}
   canvas.setColorDepth(16);
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
-  scrollConnected=probeScroll();setStateLed();updateBattery();
-  Serial.println("Sound-Chomp Phase 4B - four-track RAM prototype");splash();draw(true);
+  scrollConnected=probeScroll();setStateLed();updateWaveform();updateBattery();
+  Serial.println("Sound-Chomp Phase 4C - four-track flash storage prototype");splash();draw(true);
 }
 void loop(){
   service();
@@ -666,7 +749,7 @@ void loop(){
   }else if(page==Page::Tracks){
     if(trackDeleteConfirm){
       if(scrollShort||M5.BtnA.wasPressed()){
-        tracks[trackSelection].length=0;
+        tracks[trackSelection].length=0;deleteSavedTrack(trackSelection);
         if(trackSelection==activeTrack){captured=0;updateWaveform();}
         trackDeleteConfirm=false;scrollShort=false;draw(true);
       }
