@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 4A.4: reel transport, two-column menu, and refined playback controls.
+// Sound-Chomp Phase 4A.5: reel and transport pixel UI corrections.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -41,6 +41,8 @@ uint32_t chargeLastInteraction=0;
 bool aWasDown=false,aHoldStarted=false;uint32_t aPressedAt=0;
 int homeSelection=0,settingsSelection=0;
 float playbackSeconds=0.0f;
+float reelWheelNudge=0.0f; // transient reel rotation from idle wheel movement
+uint32_t reelWheelNudgeAt=0;
 enum class Page{Home,Chomp,Tracks,Settings,Effects,HowTo,About,Charge};
 enum class State{Idle,Recording,Playing,Error};
 Page page=Page::Chomp;
@@ -139,57 +141,92 @@ void drawSpectrum(int left,int top,int width,int height){
   }
 }
 void drawDirectionIcon(int x,int y,bool reverse){
-  // Two unambiguous, hollow-free triangles: << or >>.
+  // A pair of unmistakable VCR-style chevrons: << or >>.
+  // Open interior makes the silhouettes read as arrows rather than diamonds.
   const uint16_t c=accent();
   for(int part=0;part<2;part++){
     int ox=x+part*9;
-    for(int col=0;col<7;col++){
-      int band=reverse?6-col:col;
-      int half=3-abs(band-3);
-      canvas.drawFastVLine(ox+col,y+3-half,2*half+1,c);
+    for(int k=0;k<4;k++){
+      int px=reverse?ox+3-k:ox+k;
+      canvas.drawPixel(px,y+k,c);
+      canvas.drawPixel(px,y+6-k,c);
+      // One-pixel highlight on each flank preserves visibility on the LCD.
+      if(k==3)canvas.drawPixel(px,y+3,c);
     }
   }
 }
 void drawTapeReels(int w){
-  // Rotation derives from signed playback rate. Idle reels are stationary;
-  // recording turns at a fixed nominal rate.
-  const int cy=40,r=14;
-  const int centers[2]={w-68,w-29};
-  const float angularRate=state==State::Recording?1.0f:(state==State::Playing?speed():0.0f);
+  // Recording: fixed rate. Playing: follows signed rate. Idle: wheel turns
+  // impart a brief inertial spin in their actual direction.
+  const int cy=41,r=14;
+  const int centers[2]={w-66,w-27}; // 2px to the right of Phase 4A.4
+  float angularRate=state==State::Recording?1.0f:(state==State::Playing?speed():0.0f);
+  const uint32_t now=millis();
+  if(state==State::Idle && now-reelWheelNudgeAt<320)angularRate=reelWheelNudge;
   static float angle=0.0f;
   static uint32_t previous=0;
-  const uint32_t now=millis();
-  if(previous){const uint32_t dt=min(uint32_t(100),now-previous);angle+=angularRate*(float(dt)*0.0042f);}
+  if(previous){
+    const uint32_t dt=min(uint32_t(100),now-previous);
+    angle+=angularRate*(float(dt)*0.0042f);
+  }
   previous=now;
   for(int j=0;j<2;j++){
     int cx=centers[j];
     canvas.fillCircle(cx,cy,r,TRIM);
     canvas.fillCircle(cx,cy,r-2,PANEL);
     canvas.drawCircle(cx,cy,r-1,WHITE);
-    canvas.fillCircle(cx,cy,3,MUTED);
+    // Visible opaque black hubs even over the red recording banner.
+    canvas.fillCircle(cx,cy,4,TFT_BLACK);
     for(int k=0;k<3;k++){
       float a=angle+float(k)*2.094395f+float(j)*0.45f;
       int x0=cx+int(cosf(a)*5),y0=cy+int(sinf(a)*5);
       int x1=cx+int(cosf(a)*11),y1=cy+int(sinf(a)*11);
       canvas.drawLine(x0,y0,x1,y1,accent());
+      // Offset one pixel for stronger spokes, avoiding the central hub.
+      canvas.drawLine(x0+1,y0,x1+1,y1,accent());
     }
-    canvas.fillCircle(cx,cy,2,WHITE);
+    canvas.fillCircle(cx,cy,3,TFT_BLACK);
+    canvas.fillCircle(cx,cy,1,WHITE);
   }
-  canvas.drawFastHLine(centers[0]+r,cy+13,centers[1]-centers[0]-2*r,TRIM);
+  // No horizontal joining line across / beneath the two reels.
 }
 void drawLoopIcon(int x,int y){
   uint16_t c=loopAudio?LIME:MUTED;
-  canvas.drawFastHLine(x+3,y,11,c);canvas.drawFastVLine(x+14,y,8,c);
+  canvas.drawFastHLine(x+3,y,10,c);canvas.drawFastVLine(x+14,y+1,7,c);
   canvas.drawFastHLine(x+3,y+8,11,c);canvas.drawFastVLine(x+2,y+1,6,c);
-  canvas.fillTriangle(x+10,y-2,x+15,y,x+10,y+3,c);
+  // Deliberate 1px gap between the tail and arrowhead.
+  canvas.fillTriangle(x+11,y-2,x+16,y,x+11,y+2,c);
   canvas.fillRect(x+19,y+3,3,3,loopAudio?GREEN:0x2131);
+}
+void drawTimeLabel(int right,int y,const char* str){
+  // Original 5x9 segment digits: a 1-pixel taller clock than font size 1.
+  // Not scaling the entire font avoids blowing up the transport row.
+  static const uint8_t segments[10]={0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f};
+  int width=0;
+  for(const char* t=str;*t;t++)width+=(*t>='0'&&*t<='9')?7:(*t=='.'?3:6);
+  int x=right-width;
+  for(const char* t=str;*t;t++){
+    const char ch=*t;
+    if(ch>='0'&&ch<='9'){
+      uint8_t seg=segments[ch-'0'];
+      if(seg&0x01)canvas.drawFastHLine(x+1,y,4,WHITE);
+      if(seg&0x02)canvas.drawFastVLine(x+5,y+1,3,WHITE);
+      if(seg&0x04)canvas.drawFastVLine(x+5,y+5,3,WHITE);
+      if(seg&0x08)canvas.drawFastHLine(x+1,y+8,4,WHITE);
+      if(seg&0x10)canvas.drawFastVLine(x,y+5,3,WHITE);
+      if(seg&0x20)canvas.drawFastVLine(x,y+1,3,WHITE);
+      if(seg&0x40)canvas.drawFastHLine(x+1,y+4,4,WHITE);
+      x+=7;
+    }else if(ch=='.'){canvas.fillRect(x,y+7,2,2,WHITE);x+=3;}
+    else{canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(x,y+1);canvas.print(ch);x+=6;}
+  }
 }
 void drawWaveform(int left,int top,int width,int height){
   const int cy=top+height/2;
   canvas.drawFastHLine(left,cy,width,TRIM);
   if(captured==0){
     canvas.setTextColor(MUTED,PANEL);canvas.setCursor(left+9,cy-3);
-    canvas.print("TAP PLAY / HOLD RECORD");return;
+    canvas.print("TAP: PLAY   HOLD: REC");return;
   }
   // At 1x the clip occupies the full viewport. Faster shrinks, slower
   // stretches and is clipped. Scroll-window follows the playback cursor.
@@ -215,7 +252,7 @@ void drawChomp(){
   const int w=canvas.width(),h=canvas.height();
   // LEFT status column leaves free space for future functionality.
   if(state==State::Recording){
-    canvas.fillRect(5,22,137,42,RED);
+    canvas.fillRect(5,22,w-10,39,RED); // extends behind the reels; ends 1px above analyzer border
     // 2 Hz flash: black circle on alternating half-cycles.
     const bool flash=(millis()/250)%2==0;
     canvas.fillCircle(17,35,6,TFT_BLACK);
@@ -244,7 +281,7 @@ void drawChomp(){
   const float shownTime=state==State::Playing?playbackSeconds:
       captured?float(captured)/kSampleRate/fmaxf(0.1f,fabsf(speed())):0.0f;
   char timeBuf[17];snprintf(timeBuf,sizeof timeBuf,"%.1fs",double(shownTime));
-  canvas.setTextSize(1);canvas.setCursor(w-7-int(strlen(timeBuf))*6,rowY);canvas.print(timeBuf);
+  drawTimeLabel(w-7,rowY-1,timeBuf);
   if(state==State::Error){canvas.setTextColor(RED,BG);canvas.setCursor(85,48);canvas.print(errorText);}
 }
 void drawMenuIcon(int x,int y,int index,uint16_t color){
@@ -358,6 +395,10 @@ void handleWheel(int delta){
   if(page==Page::Home)homeSelection=constrain(homeSelection+delta,0,6);
   else if(page==Page::Chomp){
     speedIndex=constrain(speedIndex+delta,0,kSpeedCount-1);
+    if(state==State::Idle){
+      reelWheelNudge=delta>0?1.7f:-1.7f;
+      reelWheelNudgeAt=millis();
+    }
     Serial.printf("Rate: %+.2fx (live)\n",speed());
   }else if(page==Page::Settings){
     if(settingsEditing){
@@ -537,7 +578,7 @@ void setup(){
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateBattery();
-  Serial.println("Sound-Chomp Phase 4A.4 - transport and menus");splash();draw(true);
+  Serial.println("Sound-Chomp Phase 4A.5 - transport UI patch");splash();draw(true);
 }
 void loop(){
   service();

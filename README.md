@@ -43,7 +43,7 @@ Adds a skippable animated splash, Chomp-first boot, revised cassette/Winamp UI,
 How To / About pages. See [`docs/phase4a3-ui.md`](docs/phase4a3-ui.md).
 
 
-## Phase 4A.4 preview (unverified)
+## Phase 4A.5 preview (unverified)
 
 - Playback speeds ±0.50x to ±3.00x in 0.10x increments, skipping the noisy region near zero.
 - Animated stereo tape reels rotate according to playback speed and direction; they also turn during recording.

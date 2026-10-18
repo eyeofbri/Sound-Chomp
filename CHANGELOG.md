@@ -1,3 +1,8 @@
+## Unreleased — Phase 4A.5
+
+- Targeted reel animation, icon, banner, timer and waveform prompt corrections.
+- Preserves the existing Phase 4A.4 audio pipeline and input behavior.
+
 # Changelog
 
 ## Unreleased — Phase 4A.2 controls and UI
