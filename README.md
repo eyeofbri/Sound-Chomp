@@ -2,7 +2,7 @@
 
 An open-source pocket-sized Yak Bak-inspired voice recorder and sound toy for the **M5StickS3** + **M5Stack Unit Scroll**. Developed with PlatformIO and Arduino.
 
-## Phase 4A.1 playback quality patch (not yet hardware verified)
+## Project overview and build
 
 - Main menu with Chomp, Tracks, Settings.
 - A: hold-to-record in Chomp; select on Home.
@@ -13,7 +13,7 @@ An open-source pocket-sized Yak Bak-inspired voice recorder and sound toy for th
 - Improved playback chunk queueing (three rotating buffers) to reduce choppiness at 1.00x.
 - Live audio spectrum; idle waveform; purple reverse accent; Winamp-inspired flicker-free display.
 - Battery indicator, speaker volume and brightness settings (persist across reboots).
-- Single 8-second 16-kHz 16-bit mono RAM recording. Tracks currently displays a placeholder; saved tracks will arrive later.
+- Four separate 8-second 16-kHz 16-bit mono RAM recording slots (Phase 4B). Clips are lost on reboot.
 
 ### Build and upload
 
@@ -53,3 +53,16 @@ How To / About pages. See [`docs/phase4a3-ui.md`](docs/phase4a3-ui.md).
 - Brightness minimum 5%; About includes Built for Aiden.
 
 See `docs/phase4a4-transport.md` for details and a test checklist.
+
+
+## Current prototype — Phase 4B multi-track
+
+- Four separate 8-second tracks in PSRAM, with individually selectable recording buffers.
+- B opens Home, then choose Tracks. Rotate wheel to highlight CHOMP 01–04; tap A or wheel click to select and return to Chomp.
+- An asterisk identifies the active slot; recorded lengths appear next to each track.
+- Hold the Unit Scroll click on the highlighted track to ask for delete confirmation; click again to erase the track or B to cancel.
+- Recording replaces only the currently active track. **Recordings are not saved to flash.**
+- At ±3.00x limits, extra wheel turns flash reel spokes red instead of animating.
+- Playback timer now wraps for looping, alongside minor banner, icon and splash polish.
+
+See `docs/phase4b-tracks.md` for full controls, technical notes, and verification checklist.

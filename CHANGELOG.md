@@ -5,6 +5,17 @@
 
 # Changelog
 
+## Unreleased — Phase 4B multi-track prototype
+
+- Implement four selectable RAM audio slots, each holding up to eight seconds.
+- Add Tracks browser with active marker, duration, selection and delete confirmation.
+- Keep clip data isolated between tracks and refresh waveforms on selection.
+- Fix loop timer wrapping and avoid reel motion at capped wheel positions, flashing reel spokes red.
+- Fix idle guidance text overflow; enhance transport arrows and recording indicator.
+- Reduce splash wordmark and introduce pixel-crumble impact effect.
+- Pending on-device build and testing; persistent saving is deferred.
+
+
 ## Unreleased — Phase 4A.2 controls and UI
 
 - Tap Button A to play/stop; hold for 300 ms to record and release to finish.

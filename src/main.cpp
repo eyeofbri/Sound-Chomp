@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 4A.5: reel and transport pixel UI corrections.
+// Sound-Chomp Phase 4B: multi-track RAM slots and player UI corrections.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -26,8 +26,21 @@ float speed(){
   return -(0.5f+0.1f*float(magnitudeStep));
 }
 void resetSpeed(){ speedIndex=kStepsPerDirection+5; }
+constexpr int kTrackCount=4;
+struct Track {int16_t* pcm=nullptr;size_t length=0;};
+Track tracks[kTrackCount];
+int activeTrack=0,trackSelection=0;
+bool trackDeleteConfirm=false;
 int16_t *samples=nullptr,*playChunks[kPlayBuffers]={};
 size_t captured=0;
+void commitActiveTrack(){tracks[activeTrack].length=captured;}
+bool selectTrack(int which){
+  if(which<0||which>=kTrackCount)return false;
+  if(activeTrack==which)return true;
+  commitActiveTrack();
+  activeTrack=which;samples=tracks[which].pcm;captured=tracks[which].length;
+  return samples!=nullptr;
+}
 uint8_t waveform[kWaveBins]={};
 float spectrum[kBands]={};
 M5Canvas canvas(&M5.Display);
@@ -43,6 +56,7 @@ int homeSelection=0,settingsSelection=0;
 float playbackSeconds=0.0f;
 float reelWheelNudge=0.0f; // transient reel rotation from idle wheel movement
 uint32_t reelWheelNudgeAt=0;
+uint32_t limitFlashUntil=0;
 enum class Page{Home,Chomp,Tracks,Settings,Effects,HowTo,About,Charge};
 enum class State{Idle,Recording,Playing,Error};
 Page page=Page::Chomp;
@@ -148,8 +162,8 @@ void drawDirectionIcon(int x,int y,bool reverse){
     int ox=x+part*9;
     for(int k=0;k<4;k++){
       int px=reverse?ox+3-k:ox+k;
-      canvas.drawPixel(px,y+k,c);
-      canvas.drawPixel(px,y+6-k,c);
+      canvas.drawFastHLine(px,y+k,2,c);
+      canvas.drawFastHLine(px,y+6-k,2,c);
       // One-pixel highlight on each flank preserves visibility on the LCD.
       if(k==3)canvas.drawPixel(px,y+3,c);
     }
@@ -181,9 +195,9 @@ void drawTapeReels(int w){
       float a=angle+float(k)*2.094395f+float(j)*0.45f;
       int x0=cx+int(cosf(a)*5),y0=cy+int(sinf(a)*5);
       int x1=cx+int(cosf(a)*11),y1=cy+int(sinf(a)*11);
-      canvas.drawLine(x0,y0,x1,y1,accent());
+      canvas.drawLine(x0,y0,x1,y1,(now<limitFlashUntil)?RED:accent());
       // Offset one pixel for stronger spokes, avoiding the central hub.
-      canvas.drawLine(x0+1,y0,x1+1,y1,accent());
+      canvas.drawLine(x0+1,y0,x1+1,y1,(now<limitFlashUntil)?RED:accent());
     }
     canvas.fillCircle(cx,cy,3,TFT_BLACK);
     canvas.fillCircle(cx,cy,1,WHITE);
@@ -226,7 +240,7 @@ void drawWaveform(int left,int top,int width,int height){
   canvas.drawFastHLine(left,cy,width,TRIM);
   if(captured==0){
     canvas.setTextColor(MUTED,PANEL);canvas.setCursor(left+9,cy-3);
-    canvas.print("TAP: PLAY   HOLD: REC");return;
+    canvas.print("A: TAP PLAY / HOLD REC");return;
   }
   // At 1x the clip occupies the full viewport. Faster shrinks, slower
   // stretches and is clipped. Scroll-window follows the playback cursor.
@@ -255,10 +269,10 @@ void drawChomp(){
     canvas.fillRect(5,22,w-10,39,RED); // extends behind the reels; ends 1px above analyzer border
     // 2 Hz flash: black circle on alternating half-cycles.
     const bool flash=(millis()/250)%2==0;
-    canvas.fillCircle(17,35,6,TFT_BLACK);
-    if(flash)canvas.fillCircle(17,35,4,RED);
+    canvas.fillCircle(17,36,6,TFT_BLACK);
+    if(flash)canvas.fillCircle(17,36,4,RED);
     canvas.setTextSize(2);canvas.setTextColor(TFT_BLACK,RED);
-    canvas.setCursor(29,28);canvas.print("RECORDING");
+    canvas.setCursor(29,29);canvas.print("RECORDING");
   }else{
     const char* status=state==State::Playing?"PLAY":state==State::Error?"ERROR":"READY";
     canvas.setTextSize(2);canvas.setTextColor(accent(),BG);
@@ -315,12 +329,22 @@ void drawHome(){
   }
 }
 void drawTracks(){
-  int h=canvas.height();canvas.setTextColor(LIME,BG);canvas.setTextSize(2);canvas.setCursor(8,30);canvas.print("CHOMP 01");
-  canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(8,61);
-  if(captured)canvas.printf("RAM CLIP: %.2f seconds",double(captured)/kSampleRate);
-  else canvas.print("NO RECORDING YET");
-  canvas.setTextColor(MUTED,BG);canvas.setCursor(8,79);canvas.print("Saved tracks coming later");
-  canvas.setCursor(8,h-10);canvas.print("B:MENU  A/CLICK:CHOMP");
+  int w=canvas.width(),h=canvas.height();
+  for(int i=0;i<kTrackCount;i++){
+    int y=23+i*22;
+    uint16_t surface=i==trackSelection?0x32A5:PANEL;
+    canvas.fillRect(7,y,w-14,20,surface);
+    canvas.drawRect(7,y,w-14,20,i==trackSelection?LIME:TRIM);
+    canvas.setTextSize(1);canvas.setTextColor(i==trackSelection?LIME:WHITE,surface);
+    canvas.setCursor(13,y+6);canvas.printf("%c CHOMP %02d",i==activeTrack?'*':' ',i+1);
+    canvas.setCursor(w-88,y+6);
+    if(tracks[i].length)canvas.printf("%.1fs",double(tracks[i].length)/kSampleRate);
+    else canvas.print("EMPTY");
+  }
+  canvas.setTextSize(1);canvas.setTextColor(trackDeleteConfirm?RED:WHITE,BG);
+  canvas.setCursor(8,h-17);
+  if(trackDeleteConfirm)canvas.print("CLICK: DELETE  B: CANCEL");
+  else canvas.print("A/CLICK: OPEN  HOLD: CLEAR");
 }
 void drawSettings(){
   int w=canvas.width(),h=canvas.height();
@@ -346,7 +370,7 @@ void drawSettings(){
 void drawInfoPage(bool about){
   canvas.setTextSize(1);canvas.setTextColor(LIME,BG);
   if(about){
-    canvas.setCursor(8,29);canvas.print("SOUND-CHOMP v0.3.1-dev");
+    canvas.setCursor(8,29);canvas.print("SOUND-CHOMP v0.5.0-dev");
     canvas.setTextColor(WHITE,BG);canvas.setCursor(8,47);canvas.print("BUILT BY u/eyeofbri");
     canvas.setCursor(8,65);canvas.print("BUILT FOR AIDEN");
     canvas.setCursor(8,82);canvas.print("github.com/eyeofbri/");
@@ -393,11 +417,19 @@ void draw(bool force=false){
 }
 void handleWheel(int delta){
   if(page==Page::Home)homeSelection=constrain(homeSelection+delta,0,6);
+  else if(page==Page::Tracks){trackSelection=constrain(trackSelection+delta,0,kTrackCount-1);trackDeleteConfirm=false;}
   else if(page==Page::Chomp){
+    const int before=speedIndex;
     speedIndex=constrain(speedIndex+delta,0,kSpeedCount-1);
     if(state==State::Idle){
-      reelWheelNudge=delta>0?1.7f:-1.7f;
-      reelWheelNudgeAt=millis();
+      if(speedIndex==before){
+        reelWheelNudge=0;
+        reelWheelNudgeAt=0;
+        limitFlashUntil=millis()+220;
+      }else{
+        reelWheelNudge=delta>0?1.7f:-1.7f;
+        reelWheelNudgeAt=millis();
+      }
     }
     Serial.printf("Rate: %+.2fx (live)\n",speed());
   }else if(page==Page::Settings){
@@ -436,7 +468,7 @@ void updateScroll(){
 void service(){M5.update();updateScroll();}
 void clearEvents(){scrollShort=false;scrollLong=false;}
 void saveSettings(){prefs.putUChar("volume",volumePct);prefs.putUChar("bright",brightnessPct);prefs.putBool("revInvert",invertedReverse);prefs.putBool("autoPlay",autoPlay);prefs.putBool("resetSpd",resetSpeedAfterRecord);}
-void backHome(){aWasDown=false;aHoldStarted=false;if(page==Page::Settings)saveSettings();settingsEditing=false;page=Page::Home;clearEvents();draw(true);}
+void backHome(){trackDeleteConfirm=false;aWasDown=false;aHoldStarted=false;if(page==Page::Settings)saveSettings();settingsEditing=false;page=Page::Home;clearEvents();draw(true);}
 void openSelection(){
   aWasDown=M5.BtnA.isPressed();aHoldStarted=true;
   page=homeSelection==0?Page::Chomp:homeSelection==1?Page::Tracks:
@@ -447,7 +479,7 @@ void openSelection(){
 }
 void recordClip(){
   if(!samples)return;
-  captured=0;M5.Speaker.end();
+  captured=0;tracks[activeTrack].length=0;M5.Speaker.end();
   if(!M5.Mic.begin()){state=State::Error;errorText="MIC BEGIN FAILED";return;}
   state=State::Recording;setStateLed();clearEvents();draw(true);
   while(captured<kMaxSamples){
@@ -459,7 +491,7 @@ void recordClip(){
     while(M5.Mic.isRecording()){service();draw();delay(1);}
     captured+=count;analyze(samples,captured,captured-count/2);service();draw();
   }
-  M5.Mic.end();updateWaveform();if(resetSpeedAfterRecord)resetSpeed();if(state!=State::Error)state=State::Idle;
+  M5.Mic.end();commitActiveTrack();updateWaveform();if(resetSpeedAfterRecord)resetSpeed();if(state!=State::Error)state=State::Idle;
   setStateLed();clearEvents();draw(true);
   Serial.printf("Captured %.2fs\n",double(captured)/kSampleRate);
 }
@@ -499,10 +531,12 @@ void playClip(){
     if(!sourceExhausted && rate!=0 && occupied<2){
       int16_t* output=playChunks[queued%kPlayBuffers];
       size_t count=0;
+      bool loopedInChunk=false;
       for(;count<kPlayChunk;count++){
         if(cursor<0 || cursor>=double(captured)){
           if(!loopAudio){sourceExhausted=true;break;}
           cursor=cursor<0?double(captured-1):0.0;
+          loopedInChunk=true;
         }
         const size_t left=size_t(cursor);
         const size_t right=min(left+1,captured-1);
@@ -515,7 +549,13 @@ void playClip(){
         if(!M5.Speaker.playRaw(output,count,kSampleRate,false,1,kChannel,false)){
           state=State::Error;errorText="SPEAKER PLAY FAILED";break;
         }
-        ++queued;playbackSeconds+=float(count)/float(kSampleRate);
+        ++queued;
+        if(loopedInChunk)playbackSeconds=0.0f;
+        playbackSeconds+=float(count)/float(kSampleRate);
+        if(loopAudio){
+          const float duration=float(captured)/float(kSampleRate)/fmaxf(0.5f,fabsf(rate));
+          if(duration>0)playbackSeconds=fmodf(playbackSeconds,duration);
+        }
         // The Goertzel analysis can be expensive; do it on only every
         // fourth chunk, rather than on every 32ms playback chunk.
         if((chunksMade++%4)==0 && count>=kAnalysisWindow){
@@ -552,8 +592,23 @@ void splash(){
       canvas.fillTriangle(startX+4+i*12,upperY-9,startX+13+i*12,upperY-9,startX+9+i*12,upperY+4,LIME);
       canvas.fillTriangle(startX+4+i*12,lowerY+9,startX+13+i*12,lowerY+9,startX+9+i*12,lowerY-4,LIME);
     }
-    canvas.setTextSize(2);canvas.setTextColor(WHITE,BG);
-    canvas.setCursor(max(0,w/2-66),h/2-8);canvas.print("SOUND-CHOMP");
+    // Small wordmark; crumble its pixels outwards when the jaws meet.
+    const uint32_t impactAt=365;
+    const bool afterImpact=elapsed>=impactAt;
+    const int tx=max(0,w/2-57),ty=h/2-6;
+    if(!afterImpact){
+      canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);
+      canvas.setCursor(tx,ty);canvas.print("SOUND-CHOMP");
+    }else{
+      const int spread=min(32,int((elapsed-impactAt)/11));
+      for(int i=0;i<60;i++){
+        // Deterministic pixel debris, no heap allocations or RNG.
+        int dx=((i*37)%23)-11,dy=((i*19)%11)-5;
+        int x=w/2+dx*2+((i&1)?spread:-spread);
+        int y=h/2+dy+((i&2)?spread/2:-spread/2);
+        if(x>=0&&x<w&&y>=0&&y<h)canvas.drawPixel(x,y,(i%4)?WHITE:LIME);
+      }
+    }
     canvas.pushSprite(0,0);
     delay(17);
   }
@@ -570,19 +625,26 @@ void setup(){
   invertedReverse=prefs.getBool("revInvert",false);autoPlay=prefs.getBool("autoPlay",false);
   resetSpeedAfterRecord=prefs.getBool("resetSpd",true);
   M5.Display.setBrightness(uint8_t(int(brightnessPct)*255/100));
-  samples=static_cast<int16_t*>(heap_caps_malloc(kMaxSamples*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+  for(auto& t:tracks){
+    t.pcm=static_cast<int16_t*>(heap_caps_malloc(kMaxSamples*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+    t.length=0;
+  }
+  samples=tracks[0].pcm;
   for(auto& b:playChunks)b=static_cast<int16_t*>(heap_caps_malloc(kPlayChunk*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
-  bool audioBuffersReady=samples!=nullptr;for(auto* b:playChunks)audioBuffersReady=audioBuffersReady&&(b!=nullptr);
+  bool audioBuffersReady=true;for(const auto& t:tracks)audioBuffersReady=audioBuffersReady&&(t.pcm!=nullptr);for(auto* b:playChunks)audioBuffersReady=audioBuffersReady&&(b!=nullptr);
   if(!audioBuffersReady){state=State::Error;errorText="PSRAM ALLOCATION FAILED";Serial.println(errorText);}
   canvas.setColorDepth(16);
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateBattery();
-  Serial.println("Sound-Chomp Phase 4A.5 - transport UI patch");splash();draw(true);
+  Serial.println("Sound-Chomp Phase 4B - four-track RAM prototype");splash();draw(true);
 }
 void loop(){
   service();
-  if(M5.BtnB.wasPressed()&&page!=Page::Home){backHome();}
+  if(M5.BtnB.wasPressed()&&page!=Page::Home){
+    if(page==Page::Tracks&&trackDeleteConfirm){trackDeleteConfirm=false;draw(true);}
+    else backHome();
+  }
   if(page==Page::Home){
     if(M5.BtnA.wasPressed()||scrollShort){openSelection();}
     scrollLong=false;
@@ -602,8 +664,20 @@ void loop(){
     if(state==State::Idle&&scrollShort){scrollShort=false;playClip();}
     if(scrollLong){loopAudio=!loopAudio;scrollLong=false;}
   }else if(page==Page::Tracks){
-    if(M5.BtnA.wasPressed()||scrollShort){scrollShort=false;page=Page::Chomp;draw(true);}
-    scrollLong=false;
+    if(trackDeleteConfirm){
+      if(scrollShort||M5.BtnA.wasPressed()){
+        tracks[trackSelection].length=0;
+        if(trackSelection==activeTrack){captured=0;updateWaveform();}
+        trackDeleteConfirm=false;scrollShort=false;draw(true);
+      }
+      if(M5.BtnB.wasPressed()){trackDeleteConfirm=false;draw(true);}
+    }else{
+      if(scrollLong){scrollLong=false;trackDeleteConfirm=true;draw(true);}
+      else if(M5.BtnA.wasPressed()||scrollShort){
+        scrollShort=false;
+        if(selectTrack(trackSelection)){updateWaveform();page=Page::Chomp;draw(true);}
+      }
+    }
   }else if(page==Page::Settings){
     if(M5.BtnA.wasPressed()||scrollShort){scrollShort=false;settingsEditing=!settingsEditing;if(!settingsEditing)saveSettings();}
     scrollLong=false;
