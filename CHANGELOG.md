@@ -49,3 +49,14 @@ See `docs/phase3a-effects.md` and `docs/phase3b-visualization.md` for earlier st
 - Continue using queued triple-buffer playback to prevent audio gaps.
 
 This is a source prototype, not yet compiled or hardware validated.
+
+## Unreleased — Phase 4A.4
+
+- Remove heavily distorted playback speeds below 0.50x in both directions.
+- Correct cassette-style forward/reverse icons and add speed-reactive tape reels.
+- Add purple spectrum bands for reverse playback.
+- Increase recording banner height and reduce brightness minimum to 5%.
+- Introduce compact two-column Home menu with icons and an Effects placeholder.
+- Add Charge screen with battery gauge and screen-off timer.
+- Color-key How To help, Built for Aiden credit, and other player layout refinements.
+- Preserve the proven three-buffer speaker playback pipeline.

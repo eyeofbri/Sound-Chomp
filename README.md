@@ -41,3 +41,15 @@ Prior phase guides remain in `docs/`. MIT licensed; see `LICENSE` in the existin
 Adds a skippable animated splash, Chomp-first boot, revised cassette/Winamp UI,
 0.10× speed steps with no zero detent, reset-speed-on-recording preference, and
 How To / About pages. See [`docs/phase4a3-ui.md`](docs/phase4a3-ui.md).
+
+
+## Phase 4A.4 preview (unverified)
+
+- Playback speeds ±0.50x to ±3.00x in 0.10x increments, skipping the noisy region near zero.
+- Animated stereo tape reels rotate according to playback speed and direction; they also turn during recording.
+- Green/yellow/red live spectrum, switching to purple/yellow/red in reverse.
+- Two-column Home menu with icon hints and reserved Effects page.
+- Charge page with large battery and 12-second screen dim to off; button A or Unit Scroll press wakes it, B returns Home. This turns off only the **display**, not the device or charger.
+- Brightness minimum 5%; About includes Built for Aiden.
+
+See `docs/phase4a4-transport.md` for details and a test checklist.
