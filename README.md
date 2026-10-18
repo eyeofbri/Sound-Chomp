@@ -35,3 +35,9 @@ Prior phase guides remain in `docs/`. MIT licensed; see `LICENSE` in the existin
 - Tracks is still a placeholder; recordings reside in RAM.
 
 **Verification:** This package has not been compiled or physically tested. Preserve your validated Phase 4A.1 commit for rollback.
+
+### Current experimental prototype — Phase 4A.3
+
+Adds a skippable animated splash, Chomp-first boot, revised cassette/Winamp UI,
+0.10× speed steps with no zero detent, reset-speed-on-recording preference, and
+How To / About pages. See [`docs/phase4a3-ui.md`](docs/phase4a3-ui.md).
