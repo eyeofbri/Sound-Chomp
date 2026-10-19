@@ -119,3 +119,9 @@ This is a source prototype, not yet compiled or hardware validated.
 - Show `ALL(n)` for Loop All, with the active track number; continue skipping empty slots.
 - Persist echo configuration in NVS; preserve Phase 4D's three-buffer speaker queue and saved track format.
 - See [Phase 5A test guide](docs/phase5a-echo.md). This package has not been compiled or tested on hardware.
+
+## Unreleased — Phase 5B.2 UI hotfix
+- Correct embedded RGB565 artwork byte order to address red/green gradient inversion.
+- Remove opaque backgrounds behind transport controls.
+- Expand landscape transport widths and recenter the seven-segment timer.
+- Show live playback rate on speed control and hide battery percentage in portrait.

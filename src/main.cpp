@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 5B.1: Winamp-style controls, effects and adaptive layout.
+// Sound-Chomp Phase 5B.2: Winamp-style controls, effects and adaptive layout.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -257,8 +257,11 @@ void drawHeader(const char* title){
   canvas.drawRect(batteryX,7,15,8,WHITE);
   canvas.fillRect(batteryX-3,9,3,4,WHITE); // battery terminal on left
   canvas.fillRect(batteryX+2,9,(batteryPct*11)/100,4,batteryPct<20?RED:GREEN);
-  canvas.setTextColor(WHITE,PANEL);canvas.setCursor(batteryX-31,7);
-  canvas.printf("%u%%",unsigned(batteryPct));
+  // Portrait title needs the entire width; omit battery percentage there.
+  if(canvas.width()>canvas.height()){
+    canvas.setTextColor(WHITE,PANEL);canvas.setCursor(batteryX-31,7);
+    canvas.printf("%u%%",unsigned(batteryPct));
+  }
   if(charging)canvas.drawPixel(batteryX+5,6,YELLOW);
 }
 void drawSpectrum(int left,int top,int width,int height){
@@ -402,8 +405,10 @@ void drawWaveform(int left,int top,int width,int height){
 void drawTransportButtons(int w,int h){
   const bool portrait=h>w;
   const int columns=portrait?3:6;
-  const int gap=2,x0=5,rightReserve=portrait?0:42;
-  const int area=w-x0*2-rightReserve;
+  const int x0=4,gap=portrait?2:1;
+  // Landscape: six buttons use all available width, timer occupies far right.
+  const int timerWidth=38,timerGap=2;
+  const int area=portrait?w-2*x0:w-2*x0-timerWidth-timerGap;
   const int bw=(area-(columns-1)*gap)/columns;
   const int bh=portrait?24:27;
   const int y0=portrait?h-61:h-30;
@@ -411,10 +416,9 @@ void drawTransportButtons(int w,int h){
     const int col=i%columns,row=i/columns;
     const int x=x0+col*(bw+gap),y=y0+row*(bh+gap);
     const bool selected=int(playerFocus)==i;
-    const uint16_t surface=selected?0x2164:PANEL;
     const uint16_t border=selected?(playerEditing?YELLOW:LIME):TRIM;
     const uint16_t c=selected?LIME:WHITE;
-    canvas.fillRect(x,y,bw,bh,surface);
+    // Do not flood-fill the button; native RGB565 artwork shows through.
     canvas.drawRect(x,y,bw,bh,border);
     canvas.drawFastHLine(x+1,y+1,bw-2,selected?WHITE:MUTED);
     canvas.fillRect(x+bw-5,y+4,3,3,selected?(playerEditing?YELLOW:GREEN):0x10A2);
@@ -423,35 +427,37 @@ void drawTransportButtons(int w,int h){
       if(state==State::Playing){canvas.fillRect(cx-5,y+6,3,11,c);canvas.fillRect(cx+2,y+6,3,11,c);}
       else canvas.fillTriangle(cx-5,y+5,cx-5,y+16,cx+5,y+10,c);
     }else if(i==1){
-      canvas.fillTriangle(cx-8,y+6,cx-8,y+16,cx-1,y+11,c);
-      canvas.fillTriangle(cx,y+6,cx,y+16,cx+7,y+11,c);
-      canvas.setTextColor(c,surface);canvas.setTextSize(1);canvas.setCursor(cx-9,y+18);canvas.print("SPD");
+      canvas.fillTriangle(cx-8,y+5,cx-8,y+14,cx-1,y+10,c);
+      canvas.fillTriangle(cx,y+5,cx,y+14,cx+7,y+10,c);
+      char sp[12];snprintf(sp,sizeof(sp),"%+.1fx",double(speed()));
+      canvas.setTextColor(c);canvas.setTextSize(1);
+      canvas.setCursor(cx-int(strlen(sp))*3,y+17);canvas.print(sp);
     }else if(i>=2&&i<=4){
-      canvas.setTextColor(i==2?c:MUTED,surface);canvas.setTextSize(1);
+      canvas.setTextColor(i==2?c:MUTED);canvas.setTextSize(1);
       const char* labs[]={"FX1","FX2","FX3"};
       canvas.setCursor(cx-9,y+10);canvas.print(labs[i-2]);
       if(i==2&&echoEnabled)canvas.fillRect(x+3,y+3,3,3,LIME);
     }else{
-      // Clean loop arrow with explicit mode text.
       canvas.drawFastHLine(cx-7,y+6,13,c);
       canvas.drawFastVLine(cx+5,y+7,5,c);
       canvas.drawFastHLine(cx-7,y+13,12,c);
       canvas.drawFastVLine(cx-8,y+8,5,c);
       canvas.fillTriangle(cx+4,y+4,cx+9,y+6,cx+4,y+8,c);
       const char* mode=loopMode==LoopMode::Off?"OFF":loopMode==LoopMode::One?"1":"ALL";
-      canvas.setTextColor(c,surface);canvas.setTextSize(1);
+      canvas.setTextColor(c);canvas.setTextSize(1);
       canvas.setCursor(cx-int(strlen(mode))*3,y+17);canvas.print(mode);
     }
   }
+  char t[16];snprintf(t,sizeof(t),"%.1fs",double(state==State::Playing?playbackSeconds:captured/double(kSampleRate)));
   if(!portrait){
-    canvas.fillRect(w-40,y0,35,bh,PANEL);
-    canvas.drawRect(w-40,y0,35,bh,TRIM);
-    char t[16];snprintf(t,sizeof(t),"%.1fs",double(state==State::Playing?playbackSeconds:captured/double(kSampleRate)));
-    canvas.setTextSize(1);canvas.setTextColor(WHITE,PANEL);
-    const int tw=int(strlen(t))*6;canvas.setCursor(w-40+(35-tw)/2,y0+(bh-8)/2);canvas.print(t);
+    const int tx=w-x0-timerWidth;
+    canvas.drawRect(tx,y0,timerWidth,bh,TRIM);
+    // Restore custom seven-segment clock with centered text and 1px spacing.
+    int tw=0;for(const char* q=t;*q;q++)tw+=(*q>='0'&&*q<='9')?8:(*q=='.'?4:7);
+    drawTimeLabel(tx+(timerWidth+tw)/2,y0+(bh-9)/2,t);
   }else{
-    char t[16];snprintf(t,sizeof(t),"%.1fs",double(state==State::Playing?playbackSeconds:captured/double(kSampleRate)));
-    canvas.setTextSize(1);canvas.setTextColor(LIME,BG);canvas.setCursor(w-int(strlen(t))*6-7,y0-13);canvas.print(t);
+    canvas.setTextSize(1);canvas.setTextColor(LIME);
+    canvas.setCursor(w-int(strlen(t))*6-7,y0-13);canvas.print(t);
   }
 }
 
