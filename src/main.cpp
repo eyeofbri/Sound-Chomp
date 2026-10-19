@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 5B.2: Winamp-style controls, effects and adaptive layout.
+// Sound-Chomp Phase 5B.3: Winamp-style controls, effects and adaptive layout.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -369,7 +369,7 @@ void drawTimeLabel(int right,int y,const char* str){
       if(seg&0x40)canvas.drawFastHLine(x+1,y+4,4,WHITE);
       x+=8;
     }else if(ch=='.'){canvas.fillRect(x,y+7,2,2,WHITE);x+=4;}
-    else{canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(x,y+1);canvas.print(ch);x+=7;}
+    else{canvas.setTextSize(1);canvas.setTextColor(WHITE);canvas.setCursor(x,y+1);canvas.print(ch);x+=7;}
   }
 }
 void drawWaveform(int left,int top,int width,int height){
@@ -410,8 +410,8 @@ void drawTransportButtons(int w,int h){
   const int timerWidth=38,timerGap=2;
   const int area=portrait?w-2*x0:w-2*x0-timerWidth-timerGap;
   const int bw=(area-(columns-1)*gap)/columns;
-  const int bh=portrait?24:27;
-  const int y0=portrait?h-61:h-30;
+  const int bh=portrait?26:27;
+  const int y0=portrait?h-65:h-30;
   for(int i=0;i<6;i++){
     const int col=i%columns,row=i/columns;
     const int x=x0+col*(bw+gap),y=y0+row*(bh+gap);
@@ -472,13 +472,16 @@ void drawChomp(){
       canvas.setCursor(8,29);canvas.print("REC");
     }else{
       const char* heading=state==State::Playing?"PLAYING":state==State::Error?"ERROR":"READY";
-      canvas.setTextSize(2);canvas.setTextColor(accent(),BG);canvas.setCursor(8,25);canvas.print(heading);
-      canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(9,48);
-      canvas.printf("%+.1fx TRK:%d",double(speed()),activeTrack+1);
+      canvas.setTextSize(2);canvas.setTextColor(accent());
+      const int titleX=(w-canvas.textWidth(heading))/2;
+      canvas.setCursor(titleX,27);canvas.print(heading);
+      char details[40];snprintf(details,sizeof(details),"%+.1fx TRK:%d",double(speed()),activeTrack+1);
+      canvas.setTextSize(1);canvas.setTextColor(WHITE);
+      canvas.setCursor((w-canvas.textWidth(details))/2,50);canvas.print(details);
     }
     // Reels lowered for vertical arrangement, using existing art function.
     drawTapeReels(w);
-    const int left=8,top=94,vw=w-16,vh=67;
+    const int left=8,top=97,vw=w-16,vh=65;
     canvas.drawRect(left-2,top-3,vw+4,vh+6,TRIM);
     canvas.fillRect(left,top,vw,vh,PANEL);
     if(state==State::Playing||state==State::Recording)drawSpectrum(left,top,vw,vh);
@@ -491,8 +494,8 @@ void drawChomp(){
       canvas.setCursor(29,29);canvas.print("RECORDING");
     }else{
       const char* heading=state==State::Playing?"PLAYING":state==State::Error?"ERROR":"READY";
-      canvas.setTextSize(2);canvas.setTextColor(accent(),BG);canvas.setCursor(8,22);canvas.print(heading);
-      canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(9,47);
+      canvas.setTextSize(2);canvas.setTextColor(accent());canvas.setCursor(8,24);canvas.print(heading);
+      canvas.setTextSize(1);canvas.setTextColor(WHITE);canvas.setCursor(9,49);
       if(playerEditing){
         switch(playerFocus){
           case PlayerFocus::Speed:canvas.printf("SPD %+.1fx",double(speed()));break;
@@ -502,11 +505,11 @@ void drawChomp(){
         }
       }else{
         canvas.printf("%+.1fx TRK:%d",double(speed()),activeTrack+1);
-        if(state==State::Playing && echoEnabled){canvas.setCursor(9,57);canvas.printf("ECHO:%ums",unsigned(echoDelayMs));}
+        if(state==State::Playing && echoEnabled){canvas.setCursor(9,59);canvas.printf("ECHO:%ums",unsigned(echoDelayMs));}
       }
     }
     drawTapeReels(w);
-    const int left=8,top=65,vw=w-16,vh=max(12,h-106);
+    const int left=8,top=65,vw=w-16,vh=max(12,h-103);
     canvas.drawRect(left-2,top-3,vw+4,vh+6,TRIM);
     canvas.fillRect(left,top,vw,vh,PANEL);
     if(state==State::Playing||state==State::Recording)drawSpectrum(left,top,vw,vh);
@@ -870,8 +873,9 @@ void updateOrientation(){
     if(M5.Imu.update()){
       auto data=M5.Imu.getImuData();
       const float x=data.accel.x,y=data.accel.y;
-      if(fabsf(x)>fabsf(y)*1.40f && fabsf(x)>0.55f)desired=x>0?0:2;
-      else if(fabsf(y)>fabsf(x)*1.40f && fabsf(y)>0.55f)desired=y>0?1:3;
+      // StickS3 physical axes: X-dominant is landscape; Y-dominant portrait.
+      if(fabsf(x)>fabsf(y)*1.40f && fabsf(x)>0.55f)desired=x>0?1:3;
+      else if(fabsf(y)>fabsf(x)*1.40f && fabsf(y)>0.55f)desired=y>0?0:2;
       else desired=displayRotation;
     }else desired=displayRotation;
   }

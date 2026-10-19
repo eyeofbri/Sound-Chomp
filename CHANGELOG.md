@@ -1,3 +1,11 @@
+## Phase 5B.3 — UI layout corrections (prototype)
+
+- Remove opaque main player heading/detail text backgrounds and timer suffix background.
+- Correct automatic portrait/landscape axis mapping.
+- Shift landscape status 2 px lower and grow analyzer by 3 px.
+- Make portrait buttons 2 px taller while preserving lower edge, center status/details, and separate reels from waveform.
+- No changes to stored recordings or playback engine.
+
 ## Unreleased — Phase 5B.1 (experimental)
 - Explicit navigation/adjust control modes with green/amber selection indicators.
 - FX1 now handles Echo; FX2/FX3 reserved for distinct future effects.
