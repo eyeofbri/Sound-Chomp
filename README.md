@@ -1,3 +1,5 @@
+> **Phase 5E development candidate:** Non-destructive FX-2 Stutter and FX-3 Robot, plus an audible FX-1 Echo tail after one-shot playback. See [Phase 5E tests](docs/phase5e-audio-effects.md). Not yet physically verified.
+
 > Phase 5B.1 experimental UI update: see [docs/phase5b1-ui-controls.md](docs/phase5b1-ui-controls.md).
 
 > **Phase 5B development candidate (`v0.6.0-dev`):** Focusable PLAY/SPEED/FX-1/FX-2/FX-3/LOOP player controls, Winamp-inspired transport strip, Main Menu B navigation, and versioned splash. See [Phase 5B guide](docs/phase5b-player-controls.md). This candidate has not been compiled or hardware-tested.

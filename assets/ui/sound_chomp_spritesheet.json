@@ -14,7 +14,7 @@
       "#FF00FF": "theme.primary",
       "#00FFFF": "theme.secondary"
     },
-    "note": "Background PNGs are exact copies. Dynamic code shapes are reconstructed; firmware is NOT yet wired to consume this atlas. Magenta inside a sprite rect is an intentional theme-replaceable key color."
+    "note": "Phase 5E removes the unused reel sprite. Keep teeth sprite: the header renders it."
   },
   "sprites": {
     "bg_landscape": {
@@ -305,16 +305,6 @@
       "mode": "tintable",
       "guide_border": 1,
       "notes": "primary theme key #FF00FF inside sprite"
-    },
-    "icon_reel": {
-      "x": 350,
-      "y": 122,
-      "w": 22,
-      "h": 22,
-      "type": "icon",
-      "mode": "mixed",
-      "guide_border": 1,
-      "notes": "22x22 native reel cover. Transparent open windows expose code-drawn tape. No scaling."
     },
     "digit_0": {
       "x": 246,

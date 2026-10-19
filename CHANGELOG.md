@@ -1,3 +1,11 @@
+## Unreleased — Phase 5E (experimental)
+
+- Added FX-2 Stutter and FX-3 Robot as non-destructive playback effects.
+- Allowed Echo to decay after a one-shot clip without looping.
+- Added effect preferences and streamlined Effects menu.
+- Removed obsolete standalone backgrounds and unused reel sprite; retained teeth art.
+- Removed isolated charging pixel inside battery bar.
+
 ## Unreleased — Phase 5C
 
 - Integrate v1.1 canonical sprite atlas for native backgrounds and selected transport icons.
