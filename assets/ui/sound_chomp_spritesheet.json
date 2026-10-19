@@ -1,0 +1,470 @@
+{
+  "meta": {
+    "sheet": "sound_chomp_spritesheet.png",
+    "width": 512,
+    "height": 512,
+    "pixel_scale": 1,
+    "version": "1.1.0",
+    "format": "RGBA8888",
+    "coordinate_origin": "top-left",
+    "rectangles": "zero-based; x/y inclusive, right/bottom exclusive",
+    "firmware_baseline": "Phase 5B.3",
+    "guide_border_rule": "A 1px #FF00FF guide border may surround a sprite outside its crop rect. The guide border is never part of the firmware crop.",
+    "theme_keys": {
+      "#FF00FF": "primary_accent",
+      "#00FFFF": "secondary_accent_reserved"
+    },
+    "note": "Background PNGs are exact copies. Dynamic code shapes are reconstructed; firmware is NOT yet wired to consume this atlas. Magenta inside a sprite rect is an intentional theme-replaceable key color."
+  },
+  "sprites": {
+    "bg_landscape": {
+      "x": 1,
+      "y": 1,
+      "w": 240,
+      "h": 135,
+      "type": "background",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "bg_portrait": {
+      "x": 1,
+      "y": 140,
+      "w": 135,
+      "h": 240,
+      "type": "background",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "btn_l_play": {
+      "x": 246,
+      "y": 2,
+      "w": 31,
+      "h": 28,
+      "type": "frame",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "btn_l_speed": {
+      "x": 280,
+      "y": 2,
+      "w": 46,
+      "h": 28,
+      "type": "frame",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "btn_l_fx1": {
+      "x": 329,
+      "y": 2,
+      "w": 31,
+      "h": 28,
+      "type": "frame",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "btn_l_fx2": {
+      "x": 363,
+      "y": 2,
+      "w": 31,
+      "h": 28,
+      "type": "frame",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "btn_l_fx3": {
+      "x": 397,
+      "y": 2,
+      "w": 31,
+      "h": 28,
+      "type": "frame",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "btn_l_loop": {
+      "x": 431,
+      "y": 2,
+      "w": 31,
+      "h": 28,
+      "type": "frame",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "btn_l_time": {
+      "x": 465,
+      "y": 2,
+      "w": 39,
+      "h": 28,
+      "type": "frame",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "btn_p_std": {
+      "x": 246,
+      "y": 34,
+      "w": 39,
+      "h": 31,
+      "type": "frame",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "btn_p_time": {
+      "x": 288,
+      "y": 34,
+      "w": 39,
+      "h": 64,
+      "type": "frame",
+      "mode": "fixed",
+      "guide_border": 1
+    },
+    "icon_teeth": {
+      "x": 246,
+      "y": 105,
+      "w": 16,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_play": {
+      "x": 267,
+      "y": 105,
+      "w": 14,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_pause": {
+      "x": 286,
+      "y": 105,
+      "w": 12,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_speed": {
+      "x": 303,
+      "y": 105,
+      "w": 16,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_forward": {
+      "x": 324,
+      "y": 105,
+      "w": 16,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_reverse": {
+      "x": 345,
+      "y": 105,
+      "w": 16,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_fx1_echo": {
+      "x": 366,
+      "y": 105,
+      "w": 14,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_fx2_stutter": {
+      "x": 385,
+      "y": 105,
+      "w": 14,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_fx3_robot": {
+      "x": 404,
+      "y": 105,
+      "w": 14,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_loop_off": {
+      "x": 423,
+      "y": 105,
+      "w": 16,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_loop_one": {
+      "x": 444,
+      "y": 105,
+      "w": 16,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_loop_all": {
+      "x": 465,
+      "y": 105,
+      "w": 16,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_battery": {
+      "x": 486,
+      "y": 105,
+      "w": 16,
+      "h": 8,
+      "type": "icon",
+      "mode": "mixed",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_record_dot": {
+      "x": 246,
+      "y": 122,
+      "w": 8,
+      "h": 8,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_settings": {
+      "x": 259,
+      "y": 122,
+      "w": 14,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_effects": {
+      "x": 278,
+      "y": 122,
+      "w": 14,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_info": {
+      "x": 297,
+      "y": 122,
+      "w": 12,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_tracks": {
+      "x": 314,
+      "y": 122,
+      "w": 12,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_menu_back": {
+      "x": 331,
+      "y": 122,
+      "w": 14,
+      "h": 12,
+      "type": "icon",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "primary theme key #FF00FF inside sprite"
+    },
+    "icon_reel": {
+      "x": 350,
+      "y": 122,
+      "w": 22,
+      "h": 22,
+      "type": "icon",
+      "mode": "mixed",
+      "guide_border": 1,
+      "notes": "outer reel overlay; draw tape fill by code behind the transparent window areas"
+    },
+    "digit_0": {
+      "x": 246,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer digit"
+    },
+    "digit_1": {
+      "x": 257,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer digit"
+    },
+    "digit_2": {
+      "x": 268,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer digit"
+    },
+    "digit_3": {
+      "x": 279,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer digit"
+    },
+    "digit_4": {
+      "x": 290,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer digit"
+    },
+    "digit_5": {
+      "x": 301,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer digit"
+    },
+    "digit_6": {
+      "x": 312,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer digit"
+    },
+    "digit_7": {
+      "x": 323,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer digit"
+    },
+    "digit_8": {
+      "x": 334,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer digit"
+    },
+    "digit_9": {
+      "x": 345,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer digit"
+    },
+    "sym_dot": {
+      "x": 356,
+      "y": 165,
+      "w": 4,
+      "h": 4,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer/speed symbol"
+    },
+    "sym_plus": {
+      "x": 363,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer/speed symbol"
+    },
+    "sym_minus": {
+      "x": 374,
+      "y": 165,
+      "w": 8,
+      "h": 4,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer/speed symbol"
+    },
+    "sym_x": {
+      "x": 385,
+      "y": 165,
+      "w": 8,
+      "h": 12,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer/speed symbol"
+    },
+    "sym_s": {
+      "x": 396,
+      "y": 165,
+      "w": 8,
+      "h": 8,
+      "type": "glyph",
+      "mode": "tintable",
+      "guide_border": 1,
+      "notes": "custom timer/speed symbol"
+    }
+  }
+}

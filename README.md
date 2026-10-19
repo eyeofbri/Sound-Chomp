@@ -90,3 +90,7 @@ Four stored recordings and track selection survive device restarts. Echo prefere
 - Swapped automatic IMU orientation axis mapping based on hardware feedback.
 - Offset the status heading by 2 pixels, increased landscape analyzer height.
 - Taller portrait transport buttons, centered portrait status/details, increased reel-to-waveform separation.
+
+## Canonical pixel artwork
+
+Phase 5C now renders selected UI elements from `assets/ui/sound_chomp_spritesheet.png`. Edit the atlas and run `python tools/generate_ui_assets.py` to regenerate `include/generated/ui_assets.h`. See `docs/phase5c-atlas-integration.md`.

@@ -1,3 +1,9 @@
+## Unreleased — Phase 5C
+
+- Integrate v1.1 canonical sprite atlas for native backgrounds and selected transport icons.
+- Support in-sprite theme-key recoloring, guide-border-safe cropping, and reel overlay composition.
+- Add deterministic PNG-to-C++ asset generator.
+
 ## Phase 5B.3 — UI layout corrections (prototype)
 
 - Remove opaque main player heading/detail text backgrounds and timer suffix background.

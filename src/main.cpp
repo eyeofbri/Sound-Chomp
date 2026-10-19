@@ -7,7 +7,7 @@
 #include <LittleFS.h>
 #include <esp_heap_caps.h>
 #include <math.h>
-#include "retro_background.h"
+#include "generated/ui_assets.h"
 
 namespace {
 constexpr uint8_t kScrollAddress=0x40, kEncoderReg=0x10, kButtonReg=0x20, kRgbReg=0x30;
@@ -162,6 +162,7 @@ bool charging=false,settingsEditing=false,chargeScreenOff=false;
 uint32_t chargeLastInteraction=0;
 bool aWasDown=false,aHoldStarted=false;uint32_t aPressedAt=0;
 int homeSelection=0,settingsSelection=0;
+uint8_t themeSelection=0; // 0=classic lime, 1=cyan, 2=amber, 3=pink
 float playbackSeconds=0.0f;
 // Position in the currently selected clip. 0=all tape on supply, 1=all on take-up.
 float tapePosition=0.0f;
@@ -175,7 +176,11 @@ Page page=Page::Chomp;
 State state=State::Idle;
 const char* errorText="";
 constexpr uint16_t BG=0x0841,PANEL=0x18C3,TRIM=0x6B4D,GREEN=0x07E0,LIME=0xBFE0,PURPLE=0xB1BC,YELLOW=0xFFE0,RED=0xF800,MUTED=0xA534,WHITE=0xE71C;
-uint16_t accent(){return speed()<0 ? PURPLE : GREEN;}
+uint16_t themeAccent(){
+  static constexpr uint16_t colors[]={GREEN,0x07FF,0xFD20,0xF81F};
+  return colors[constrain(int(themeSelection),0,3)];
+}
+uint16_t accent(){return speed()<0 ? PURPLE : themeAccent();}
 bool selectTrack(int which){
   if(which<0||which>=kTrackCount)return false;
   if(activeTrack==which)return true;
@@ -235,18 +240,37 @@ void updateBattery(){
   batteryPct=uint8_t(constrain(int(M5.Power.getBatteryLevel()),0,100));
   charging=M5.Power.isCharging();
 }
-void drawTeeth(int x,int y){
-  // Original 12x11 two-jaw pixel glyph; deliberately distinct from reference artwork.
-  const uint16_t toothColor=LIME;
-  canvas.drawFastHLine(x,y,12,toothColor);
-  canvas.drawFastHLine(x,y+10,12,toothColor);
-  for(int i=0;i<4;i++){
-    int tx=x+1+i*3;
-    canvas.fillRect(tx,y+1,2,2,toothColor);
-    canvas.fillRect(tx,y+8,2,2,toothColor);
-    canvas.drawPixel(tx,y+3,toothColor);
-    canvas.drawPixel(tx+1,y+7,toothColor);
+// Canonical sprite drawing: exact image pixels, guide borders excluded at export.
+// Transparent=skip, opaque #FF00FF=theme primary, #00FFFF=secondary.
+void drawAtlasSprite(const ChompArt::Sprite& sprite,int x,int y,uint16_t primary,uint16_t secondary=WHITE){
+  for(int py=0;py<sprite.h;++py){
+    for(int px=0;px<sprite.w;++px){
+      const uint32_t c=sprite.pixels[py*sprite.w+px];
+      if(c==0)continue;
+      const uint16_t out=c==0x10000?primary:(c==0x20000?secondary:uint16_t(c&0xffff));
+      canvas.drawPixel(x+px,y+py,out);
+    }
   }
+}
+// Rotate the edited reel COVER, leaving transparent windows open to see tape
+// drawn behind it. The hub and tape progression remain independent of artwork.
+void drawRotatedAtlasReel(int cx,int cy,float angle,uint16_t primary){
+  const auto& sprite=ChompArt::IconReel;
+  const float co=cosf(angle),si=sinf(angle);
+  const float hx=(sprite.w-1)*0.5f,hy=(sprite.h-1)*0.5f;
+  for(int oy=0;oy<sprite.h;++oy)for(int ox=0;ox<sprite.w;++ox){
+    const float dx=ox-hx,dy=oy-hy;
+    const int sx=int(lroundf(co*dx+si*dy+hx));
+    const int sy=int(lroundf(-si*dx+co*dy+hy));
+    if(sx<0||sy<0||sx>=sprite.w||sy>=sprite.h)continue;
+    const uint32_t c=sprite.pixels[sy*sprite.w+sx];
+    if(!c)continue;
+    canvas.drawPixel(cx+ox-int(hx+0.5f),cy+oy-int(hy+0.5f),
+       c==0x10000?primary:(c==0x20000?WHITE:uint16_t(c&0xffff)));
+  }
+}
+void drawTeeth(int x,int y){
+  drawAtlasSprite(ChompArt::IconTeeth,x,y,themeAccent());
 }
 void drawHeader(const char* title){
   int w=canvas.width();
@@ -315,23 +339,12 @@ void drawTapeReels(int w){
   for(int j=0;j<2;j++){
     const int cx=centers[j];
     const uint16_t tint=(now<limitFlashUntil)?RED:accent();
-    // Hub radius 11, with a 2..5px band of magnetic tape outside.
-    // A full supply reel becomes empty as the take-up reel fills.
+    // Animated tape mass behind the rotating cover, exposed through its windows.
     const float fill=j==0?1.0f-p:p;
-    const int outer=13+int(lroundf(fill*3.0f));
-    canvas.fillCircle(cx,cy,outer,tint);
-    canvas.fillCircle(cx,cy,11,PANEL);
-    canvas.drawCircle(cx,cy,11,WHITE);
-    for(int k=0;k<3;k++){
-      float a=angle+float(k)*2.094395f+float(j)*0.45f;
-      int x0=cx+int(cosf(a)*4),y0=cy+int(sinf(a)*4);
-      int x1=cx+int(cosf(a)*9),y1=cy+int(sinf(a)*9);
-      canvas.drawLine(x0,y0,x1,y1,tint);
-      canvas.drawLine(x0+1,y0,x1+1,y1,tint);
-    }
-    // Black center remains opaque over the recording banner.
-    canvas.fillCircle(cx,cy,3,TFT_BLACK);
-    canvas.drawPixel(cx,cy,WHITE);
+    const int radius=7+int(lroundf(fill*9.0f));
+    canvas.fillCircle(cx,cy,radius,tint);
+    drawRotatedAtlasReel(cx,cy,angle+float(j)*0.45f,tint);
+
   }
 }
 void drawLoopIcon(int x,int y){
@@ -424,11 +437,10 @@ void drawTransportButtons(int w,int h){
     canvas.fillRect(x+bw-5,y+4,3,3,selected?(playerEditing?YELLOW:GREEN):0x10A2);
     const int cx=x+bw/2;
     if(i==0){
-      if(state==State::Playing){canvas.fillRect(cx-5,y+6,3,11,c);canvas.fillRect(cx+2,y+6,3,11,c);}
-      else canvas.fillTriangle(cx-5,y+5,cx-5,y+16,cx+5,y+10,c);
+      if(state==State::Playing)drawAtlasSprite(ChompArt::IconPause,cx-6,y+5,c);
+      else drawAtlasSprite(ChompArt::IconPlay,cx-7,y+5,c);
     }else if(i==1){
-      canvas.fillTriangle(cx-8,y+5,cx-8,y+14,cx-1,y+10,c);
-      canvas.fillTriangle(cx,y+5,cx,y+14,cx+7,y+10,c);
+      drawAtlasSprite(ChompArt::IconSpeed,cx-8,y+5,c);
       char sp[12];snprintf(sp,sizeof(sp),"%+.1fx",double(speed()));
       canvas.setTextColor(c);canvas.setTextSize(1);
       canvas.setCursor(cx-int(strlen(sp))*3,y+17);canvas.print(sp);
@@ -438,11 +450,8 @@ void drawTransportButtons(int w,int h){
       canvas.setCursor(cx-9,y+10);canvas.print(labs[i-2]);
       if(i==2&&echoEnabled)canvas.fillRect(x+3,y+3,3,3,LIME);
     }else{
-      canvas.drawFastHLine(cx-7,y+6,13,c);
-      canvas.drawFastVLine(cx+5,y+7,5,c);
-      canvas.drawFastHLine(cx-7,y+13,12,c);
-      canvas.drawFastVLine(cx-8,y+8,5,c);
-      canvas.fillTriangle(cx+4,y+4,cx+9,y+6,cx+4,y+8,c);
+      const ChompArt::Sprite& li=loopMode==LoopMode::Off?ChompArt::IconLoopOff:(loopMode==LoopMode::One?ChompArt::IconLoopOne:ChompArt::IconLoopAll);
+      drawAtlasSprite(li,cx-8,y+4,c);
       const char* mode=loopMode==LoopMode::Off?"OFF":loopMode==LoopMode::One?"1":"ALL";
       canvas.setTextColor(c);canvas.setTextSize(1);
       canvas.setCursor(cx-int(strlen(mode))*3,y+17);canvas.print(mode);
@@ -569,22 +578,23 @@ void drawTracks(){
 }
 void drawSettings(){
   int w=canvas.width(),h=canvas.height();
-  const char* labels[]={"VOLUME","BRIGHT","REVERSE MAP","AUTO PLAY","RESET SPEED","ORIENTATION"};
-  const char* shortLabels[]={"VOL","BRGT","REV","AUTO","RESET","ORIENT"};
-  for(int i=0;i<6;i++){
-    int y=21+i*16;bool sel=settingsSelection==i;
+  const char* labels[]={"VOLUME","BRIGHT","REVERSE MAP","AUTO PLAY","RESET SPEED","ORIENTATION","THEME"};
+  const char* shortLabels[]={"VOL","BRGT","REV","AUTO","RESET","ORIENT","THEME"};
+  for(int i=0;i<7;i++){
+    int y=19+i*14;bool sel=settingsSelection==i;
     uint16_t surface=sel?0x32A5:PANEL;
-    canvas.fillRect(7,y,w-14,16,surface);
-    canvas.drawRect(7,y,w-14,16,sel?(settingsEditing?YELLOW:LIME):TRIM);
+    canvas.fillRect(7,y,w-14,14,surface);
+    canvas.drawRect(7,y,w-14,14,sel?(settingsEditing?YELLOW:LIME):TRIM);
     canvas.setTextColor(sel?LIME:WHITE,surface);canvas.setTextSize(1);
-    canvas.setCursor(13,y+5);canvas.print(h>w?shortLabels[i]:labels[i]);
-    canvas.setCursor(w-(h>w?52:75),y+5);
+    canvas.setCursor(13,y+3);canvas.print(h>w?shortLabels[i]:labels[i]);
+    canvas.setCursor(w-(h>w?52:75),y+3);
     if(i==0)canvas.printf("%u%%",unsigned(volumePct));
     else if(i==1)canvas.printf("%u%%",unsigned(brightnessPct));
     else if(i==2)canvas.print(invertedReverse?"INVERTED":"NORMAL");
     else if(i==3)canvas.print(autoPlay?"ON":"OFF");
     else if(i==4)canvas.print(resetSpeedAfterRecord?"ON":"OFF");
-    else canvas.print(orientationMode==OrientationMode::Landscape?"LAND":orientationMode==OrientationMode::Portrait?"VERT":"AUTO");
+    else if(i==5)canvas.print(orientationMode==OrientationMode::Landscape?"LAND":orientationMode==OrientationMode::Portrait?"VERT":"AUTO");
+    else canvas.print(themeSelection==0?"GREEN":themeSelection==1?"CYAN":themeSelection==2?"AMBER":"PINK");
   }
   canvas.setTextColor(WHITE,BG);canvas.setCursor(7,h-14);
   canvas.print(settingsEditing?"TURN:CHANGE CLICK:DONE":"TURN:SELECT CLICK:EDIT");
@@ -651,8 +661,8 @@ void draw(bool force=false){
   if(!force&&millis()-lastFrame<kFrameMs)return;
   lastFrame=millis();updateBattery();
   // Static pre-rendered RGB565 art, followed by dynamic off-screen rendering.
-  if(canvas.width()>canvas.height())canvas.pushImage(0,0,240,135,kRetroLandscape);
-  else canvas.pushImage(0,0,135,240,kRetroPortrait);
+  if(canvas.width()>canvas.height())canvas.pushImage(0,0,240,135,ChompArt::kRetroLandscape);
+  else canvas.pushImage(0,0,135,240,ChompArt::kRetroPortrait);
   drawHeader(page==Page::Home?"SOUND-CHOMP":page==Page::Chomp?"CHOMP / PLAYER":page==Page::Tracks?"TRACKS":page==Page::Effects?"EFFECTS":page==Page::HowTo?"HOW TO":page==Page::About?"ABOUT":page==Page::Charge?"CHARGE":"SETTINGS");
   if(page==Page::Home)drawHome();else if(page==Page::Chomp)drawChomp();
   else if(page==Page::Tracks)drawTracks();else if(page==Page::Settings)drawSettings();
@@ -698,7 +708,8 @@ void handleWheel(int delta){
       else if(settingsSelection==3 && delta!=0)autoPlay=delta>0;
       else if(settingsSelection==4 && delta!=0)resetSpeedAfterRecord=delta>0;
       else if(settingsSelection==5 && delta!=0)orientationMode=static_cast<OrientationMode>(constrain(int(orientationMode)+(delta>0?1:-1),0,2));
-    }else settingsSelection=constrain(settingsSelection+delta,0,5);
+      else if(settingsSelection==6 && delta!=0)themeSelection=uint8_t(constrain(int(themeSelection)+delta,0,3));
+    }else settingsSelection=constrain(settingsSelection+delta,0,6);
   }
 }
 void updateScroll(){
@@ -726,7 +737,7 @@ void updateScroll(){
 }
 void service(){M5.update();updateScroll();}
 void clearEvents(){scrollShort=false;scrollLong=false;}
-void saveSettings(){prefs.putUChar("volume",volumePct);prefs.putUChar("bright",brightnessPct);prefs.putBool("revInvert",invertedReverse);prefs.putBool("autoPlay",autoPlay);prefs.putBool("resetSpd",resetSpeedAfterRecord);prefs.putUChar("orientation",uint8_t(orientationMode));}
+void saveSettings(){prefs.putUChar("volume",volumePct);prefs.putUChar("bright",brightnessPct);prefs.putBool("revInvert",invertedReverse);prefs.putBool("autoPlay",autoPlay);prefs.putBool("resetSpd",resetSpeedAfterRecord);prefs.putUChar("orientation",uint8_t(orientationMode));prefs.putUChar("theme",themeSelection);}
 void saveEchoSettings(){prefs.putBool("echoOn",echoEnabled);prefs.putUChar("echoWet",echoWet);prefs.putUShort("echoDelay",echoDelayMs);}
 void backHome(){trackDeleteConfirm=false;aWasDown=false;aHoldStarted=false;if(page==Page::Settings)saveSettings();if(page==Page::Effects)saveEchoSettings();settingsEditing=false;effectsEditing=false;page=Page::Home;clearEvents();draw(true);}
 void openSelection(){
@@ -941,6 +952,7 @@ void setup(){
   invertedReverse=prefs.getBool("revInvert",false);autoPlay=prefs.getBool("autoPlay",false);
   resetSpeedAfterRecord=prefs.getBool("resetSpd",true);
   orientationMode=static_cast<OrientationMode>(constrain(int(prefs.getUChar("orientation",0)),0,2));
+  themeSelection=uint8_t(constrain(int(prefs.getUChar("theme",0)),0,3));
   echoEnabled=prefs.getBool("echoOn",false);
   echoWet=uint8_t(constrain(int(prefs.getUChar("echoWet",35)),0,100));
   echoDelayMs=uint16_t(constrain(int(prefs.getUShort("echoDelay",250)),kEchoMinMs,kEchoMaxMs));
