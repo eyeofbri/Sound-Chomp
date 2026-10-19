@@ -4,7 +4,7 @@ Pure standard-library PNG reader, supports non-interlaced RGB/RGBA 8-bit PNG.
 Magenta guides fall outside mapped crop rectangles and never enter output.
 """
 from pathlib import Path
-import json, struct, zlib
+import json, struct, zlib, sys
 ROOT=Path(__file__).resolve().parents[1]
 ATLAS=ROOT/'assets/ui/sound_chomp_spritesheet.png'
 MAP=ROOT/'assets/ui/sound_chomp_spritesheet.json'
@@ -51,7 +51,31 @@ def cident(name):return ''.join(part.capitalize() for part in name.split('_'))
 
 info=json.loads(MAP.read_text())
 w,h,rows=load_png(ATLAS)
-assert (w,h)==(info['meta']['width'],info['meta']['height'])
+if (w,h)!=(info['meta']['width'],info['meta']['height']):
+    raise ValueError('PNG size does not match manifest')
+if info['meta'].get('skin_contract')!='sound-chomp-atlas-v1':
+    raise ValueError('Missing/unsupported skin_contract')
+if 'icon_teeth' in info['sprites']:
+    raise ValueError('Branding must remain outside editable skins: icon_teeth')
+used=[]
+for name,s in info['sprites'].items():
+    if not name.isidentifier() or not all(isinstance(s.get(k),int) for k in ('x','y','w','h')):
+        raise ValueError(f'Invalid sprite name/coordinates: {name}')
+    x,y,sw,sh=(s[k] for k in ('x','y','w','h'))
+    if sw<1 or sh<1 or x<1 or y<1 or x+sw>=w or y+sh>=h:
+        raise ValueError(f'Sprite out of bounds: {name}')
+    rect=(x-1,y-1,x+sw,y+sh)
+    for other,other_rect in used:
+        if rect[0]<other_rect[2] and rect[2]>other_rect[0] and rect[1]<other_rect[3] and rect[3]>other_rect[1]:
+            raise ValueError(f'Overlapping sprites/guides: {name} and {other}')
+    used.append((name,rect))
+    # A guide is a 1px magenta frame just outside the crop. It's not firmware art.
+    border=[rows[y-1][px] for px in range(x-1,x+sw+1)] + [rows[y+sh][px] for px in range(x-1,x+sw+1)]
+    border += [rows[py][x-1] for py in range(y,y+sh)] + [rows[py][x+sw] for py in range(y,y+sh)]
+    if any(pixel[:3]!=(255,0,255) or pixel[3]!=255 for pixel in border):
+        raise ValueError(f'Missing or damaged magenta guide frame: {name}')
+print(f'Validated {len(used)} sprites and guides in {w}x{h} atlas')
+if '--validate-only' in sys.argv: sys.exit(0)
 lines=['#pragma once','#include <Arduino.h>',
        '// AUTO GENERATED: edit PNG + JSON, not this file.',
        'namespace ChompArt {',

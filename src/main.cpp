@@ -8,6 +8,7 @@
 #include <esp_heap_caps.h>
 #include <math.h>
 #include "generated/ui_assets.h"
+#include "branding.h"
 
 namespace {
 constexpr uint8_t kScrollAddress=0x40, kEncoderReg=0x10, kButtonReg=0x20, kRgbReg=0x30;
@@ -293,7 +294,7 @@ void drawAtlasSprite(const ChompArt::Sprite& sprite,int x,int y,uint16_t primary
   }
 }
 void drawTeeth(int x,int y){
-  drawAtlasSprite(ChompArt::IconTeeth,x,y,themeAccent());
+  drawAtlasSprite(ChompBrand::Teeth,x,y,themeAccent());
 }
 void drawHeader(const char* title){
   int w=canvas.width();

@@ -164,3 +164,11 @@ This is a source prototype, not yet compiled or hardware validated.
 - Remove the timer border, using warning color while idle and active color during playback.
 - Remove the low-contrast menu selection fills; retain themed focus borders.
 - Move the charging indicator pixel inside the battery frame to prevent the white/bright pixel above the battery.
+
+## Phase 5F — Skin foundations (unreleased development)
+
+- Move theme-aware Sound-Chomp teeth logo to firmware-owned `include/branding.h`; exclude it from community-editable atlases.
+- Deterministically pack 44 remaining sprite crops into 244x383 PNG with magenta guide borders and JSON coordinates automatically rewritten.
+- Add optional `tools/pack_spritesheet.py`, atlas-guide validation and `--validate-only` mode.
+- Draft future skin metadata contract; no runtime loading or USB functionality yet.
+- Keep audio effects, recording format and saved-track handling unchanged.

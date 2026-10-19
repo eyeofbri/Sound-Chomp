@@ -1,25 +1,30 @@
 {
   "meta": {
     "sheet": "sound_chomp_spritesheet.png",
-    "width": 512,
-    "height": 512,
+    "width": 244,
+    "height": 383,
     "pixel_scale": 1,
-    "version": "1.2.0",
+    "version": "2.0.0",
     "format": "RGBA8888",
     "coordinate_origin": "top-left",
     "rectangles": "zero-based; x/y inclusive, right/bottom exclusive",
-    "firmware_baseline": "Phase 5D",
+    "firmware_baseline": "Phase 5F",
     "guide_border_rule": "A 1px #FF00FF guide border may surround a sprite outside its crop rect. The guide border is never part of the firmware crop.",
     "theme_keys": {
       "#FF00FF": "theme.primary",
       "#00FFFF": "theme.secondary"
     },
-    "note": "Phase 5E removes the unused reel sprite. Keep teeth sprite: the header renders it."
+    "note": "Editable skin art only. Logo/teeth are protected in include/branding.h; audio UI controls remain firmware-owned.",
+    "skin_contract": "sound-chomp-atlas-v1",
+    "brand_exclusions": [
+      "icon_teeth"
+    ],
+    "packing": "deterministic MaxRects, 1px border, 1px padding; optional tools/pack_spritesheet.py"
   },
   "sprites": {
     "bg_landscape": {
-      "x": 1,
-      "y": 1,
+      "x": 2,
+      "y": 246,
       "w": 240,
       "h": 135,
       "type": "background",
@@ -27,8 +32,8 @@
       "guide_border": 1
     },
     "bg_portrait": {
-      "x": 1,
-      "y": 140,
+      "x": 2,
+      "y": 2,
       "w": 135,
       "h": 240,
       "type": "background",
@@ -36,8 +41,8 @@
       "guide_border": 1
     },
     "btn_l_play": {
-      "x": 246,
-      "y": 2,
+      "x": 176,
+      "y": 133,
       "w": 31,
       "h": 28,
       "type": "frame",
@@ -45,8 +50,8 @@
       "guide_border": 1
     },
     "btn_l_speed": {
-      "x": 280,
-      "y": 2,
+      "x": 184,
+      "y": 37,
       "w": 46,
       "h": 28,
       "type": "frame",
@@ -54,8 +59,8 @@
       "guide_border": 1
     },
     "btn_l_fx1": {
-      "x": 329,
-      "y": 2,
+      "x": 141,
+      "y": 70,
       "w": 31,
       "h": 28,
       "type": "frame",
@@ -63,8 +68,8 @@
       "guide_border": 1
     },
     "btn_l_fx2": {
-      "x": 363,
-      "y": 2,
+      "x": 176,
+      "y": 101,
       "w": 31,
       "h": 28,
       "type": "frame",
@@ -72,8 +77,8 @@
       "guide_border": 1
     },
     "btn_l_fx3": {
-      "x": 397,
-      "y": 2,
+      "x": 141,
+      "y": 102,
       "w": 31,
       "h": 28,
       "type": "frame",
@@ -81,8 +86,8 @@
       "guide_border": 1
     },
     "btn_l_loop": {
-      "x": 431,
-      "y": 2,
+      "x": 211,
+      "y": 101,
       "w": 31,
       "h": 28,
       "type": "frame",
@@ -90,8 +95,8 @@
       "guide_border": 1
     },
     "btn_l_time": {
-      "x": 465,
-      "y": 2,
+      "x": 184,
+      "y": 69,
       "w": 39,
       "h": 28,
       "type": "frame",
@@ -99,8 +104,8 @@
       "guide_border": 1
     },
     "btn_p_std": {
-      "x": 246,
-      "y": 34,
+      "x": 184,
+      "y": 2,
       "w": 39,
       "h": 31,
       "type": "frame",
@@ -108,27 +113,17 @@
       "guide_border": 1
     },
     "btn_p_time": {
-      "x": 288,
-      "y": 34,
+      "x": 141,
+      "y": 2,
       "w": 39,
       "h": 64,
       "type": "frame",
       "mode": "fixed",
       "guide_border": 1
     },
-    "icon_teeth": {
-      "x": 246,
-      "y": 105,
-      "w": 16,
-      "h": 12,
-      "type": "icon",
-      "mode": "tintable",
-      "guide_border": 1,
-      "notes": "primary theme key #FF00FF inside sprite"
-    },
     "icon_play": {
-      "x": 267,
-      "y": 105,
+      "x": 141,
+      "y": 214,
       "w": 14,
       "h": 12,
       "type": "icon",
@@ -137,8 +132,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_pause": {
-      "x": 286,
-      "y": 105,
+      "x": 159,
+      "y": 214,
       "w": 12,
       "h": 12,
       "type": "icon",
@@ -147,8 +142,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_speed": {
-      "x": 303,
-      "y": 105,
+      "x": 141,
+      "y": 182,
       "w": 16,
       "h": 12,
       "type": "icon",
@@ -157,8 +152,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_forward": {
-      "x": 324,
-      "y": 105,
+      "x": 141,
+      "y": 134,
       "w": 16,
       "h": 12,
       "type": "icon",
@@ -167,8 +162,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_reverse": {
-      "x": 345,
-      "y": 105,
+      "x": 141,
+      "y": 166,
       "w": 16,
       "h": 12,
       "type": "icon",
@@ -177,8 +172,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_fx1_echo": {
-      "x": 366,
-      "y": 105,
+      "x": 227,
+      "y": 85,
       "w": 14,
       "h": 12,
       "type": "icon",
@@ -187,8 +182,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_fx2_stutter": {
-      "x": 385,
-      "y": 105,
+      "x": 227,
+      "y": 2,
       "w": 14,
       "h": 12,
       "type": "icon",
@@ -197,8 +192,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_fx3_robot": {
-      "x": 404,
-      "y": 105,
+      "x": 227,
+      "y": 18,
       "w": 14,
       "h": 12,
       "type": "icon",
@@ -207,8 +202,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_loop_off": {
-      "x": 423,
-      "y": 105,
+      "x": 211,
+      "y": 133,
       "w": 16,
       "h": 12,
       "type": "icon",
@@ -217,8 +212,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_loop_one": {
-      "x": 444,
-      "y": 105,
+      "x": 211,
+      "y": 149,
       "w": 16,
       "h": 12,
       "type": "icon",
@@ -227,8 +222,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_loop_all": {
-      "x": 465,
-      "y": 105,
+      "x": 141,
+      "y": 150,
       "w": 16,
       "h": 12,
       "type": "icon",
@@ -237,8 +232,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_battery": {
-      "x": 486,
-      "y": 105,
+      "x": 185,
+      "y": 181,
       "w": 16,
       "h": 8,
       "type": "icon",
@@ -247,8 +242,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_record_dot": {
-      "x": 246,
-      "y": 122,
+      "x": 197,
+      "y": 165,
       "w": 8,
       "h": 8,
       "type": "icon",
@@ -257,8 +252,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_settings": {
-      "x": 259,
-      "y": 122,
+      "x": 141,
+      "y": 230,
       "w": 14,
       "h": 12,
       "type": "icon",
@@ -267,8 +262,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_effects": {
-      "x": 278,
-      "y": 122,
+      "x": 227,
+      "y": 69,
       "w": 14,
       "h": 12,
       "type": "icon",
@@ -277,8 +272,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_info": {
-      "x": 297,
-      "y": 122,
+      "x": 159,
+      "y": 198,
       "w": 12,
       "h": 12,
       "type": "icon",
@@ -287,8 +282,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_tracks": {
-      "x": 314,
-      "y": 122,
+      "x": 159,
+      "y": 230,
       "w": 12,
       "h": 12,
       "type": "icon",
@@ -297,8 +292,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "icon_menu_back": {
-      "x": 331,
-      "y": 122,
+      "x": 141,
+      "y": 198,
       "w": 14,
       "h": 12,
       "type": "icon",
@@ -307,8 +302,8 @@
       "notes": "primary theme key #FF00FF inside sprite"
     },
     "digit_0": {
-      "x": 246,
-      "y": 165,
+      "x": 234,
+      "y": 34,
       "w": 8,
       "h": 12,
       "type": "glyph",
@@ -317,8 +312,8 @@
       "notes": "custom timer digit"
     },
     "digit_1": {
-      "x": 257,
-      "y": 165,
+      "x": 234,
+      "y": 50,
       "w": 8,
       "h": 12,
       "type": "glyph",
@@ -327,8 +322,8 @@
       "notes": "custom timer digit"
     },
     "digit_2": {
-      "x": 268,
-      "y": 165,
+      "x": 161,
+      "y": 134,
       "w": 8,
       "h": 12,
       "type": "glyph",
@@ -337,8 +332,8 @@
       "notes": "custom timer digit"
     },
     "digit_3": {
-      "x": 279,
-      "y": 165,
+      "x": 161,
+      "y": 150,
       "w": 8,
       "h": 12,
       "type": "glyph",
@@ -347,8 +342,8 @@
       "notes": "custom timer digit"
     },
     "digit_4": {
-      "x": 290,
-      "y": 165,
+      "x": 231,
+      "y": 133,
       "w": 8,
       "h": 12,
       "type": "glyph",
@@ -357,8 +352,8 @@
       "notes": "custom timer digit"
     },
     "digit_5": {
-      "x": 301,
-      "y": 165,
+      "x": 231,
+      "y": 149,
       "w": 8,
       "h": 12,
       "type": "glyph",
@@ -367,8 +362,8 @@
       "notes": "custom timer digit"
     },
     "digit_6": {
-      "x": 312,
-      "y": 165,
+      "x": 161,
+      "y": 166,
       "w": 8,
       "h": 12,
       "type": "glyph",
@@ -377,8 +372,8 @@
       "notes": "custom timer digit"
     },
     "digit_7": {
-      "x": 323,
-      "y": 165,
+      "x": 161,
+      "y": 182,
       "w": 8,
       "h": 12,
       "type": "glyph",
@@ -387,7 +382,7 @@
       "notes": "custom timer digit"
     },
     "digit_8": {
-      "x": 334,
+      "x": 173,
       "y": 165,
       "w": 8,
       "h": 12,
@@ -397,8 +392,8 @@
       "notes": "custom timer digit"
     },
     "digit_9": {
-      "x": 345,
-      "y": 165,
+      "x": 173,
+      "y": 181,
       "w": 8,
       "h": 12,
       "type": "glyph",
@@ -407,8 +402,8 @@
       "notes": "custom timer digit"
     },
     "sym_dot": {
-      "x": 356,
-      "y": 165,
+      "x": 176,
+      "y": 70,
       "w": 4,
       "h": 4,
       "type": "glyph",
@@ -417,8 +412,8 @@
       "notes": "custom timer/speed symbol"
     },
     "sym_plus": {
-      "x": 363,
-      "y": 165,
+      "x": 175,
+      "y": 197,
       "w": 8,
       "h": 12,
       "type": "glyph",
@@ -427,8 +422,8 @@
       "notes": "custom timer/speed symbol"
     },
     "sym_minus": {
-      "x": 374,
-      "y": 165,
+      "x": 175,
+      "y": 225,
       "w": 8,
       "h": 4,
       "type": "glyph",
@@ -437,7 +432,7 @@
       "notes": "custom timer/speed symbol"
     },
     "sym_x": {
-      "x": 385,
+      "x": 185,
       "y": 165,
       "w": 8,
       "h": 12,
@@ -447,8 +442,8 @@
       "notes": "custom timer/speed symbol"
     },
     "sym_s": {
-      "x": 396,
-      "y": 165,
+      "x": 175,
+      "y": 213,
       "w": 8,
       "h": 8,
       "type": "glyph",

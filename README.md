@@ -100,3 +100,9 @@ Phase 5C now renders selected UI elements from `assets/ui/sound_chomp_spriteshee
 ### Atlas-based UI workflow (Phase 5D development)
 
 Edit the source PNG at `assets/ui/sound_chomp_spritesheet.png`; keep the crop regions fixed in `sound_chomp_spritesheet.json`. PlatformIO runs `tools/platformio_prebuild.py` automatically and regenerates `include/generated/ui_assets.h` before compilation. No separate command or Pillow installation is required. See `docs/phase5d-atlas-themes.md` for palette values, remaining procedural UI, and testing details.
+
+### Phase 5F: editable skins groundwork
+
+The bundled skin atlas is now compact (244x383) and has 44 editable sprites. The Sound-Chomp teeth logo is deliberately stored in `include/branding.h` rather than in the atlas; it still follows the primary theme color. Builds **automatically validate** the magenta guide frames and regenerate firmware image assets. For optional deterministic repacking of the PNG + JSON, use `python tools/pack_spritesheet.py` (requires Pillow). See `docs/phase5f-skin-foundations.md`.
+
+`skins/examples/skin.json` specifies an early proposal for a future skin package; **USB transfers and runtime custom-skin loading do not exist yet**.
