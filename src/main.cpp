@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 4C: LittleFS persistent tracks and player legibility fixes.
+// Sound-Chomp Phase 4D: persistent active track, loop modes and tape-transfer reels.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -105,13 +105,7 @@ void loadTracks(){
 int16_t *samples=nullptr,*playChunks[kPlayBuffers]={};
 size_t captured=0;
 void commitActiveTrack(){tracks[activeTrack].length=captured;}
-bool selectTrack(int which){
-  if(which<0||which>=kTrackCount)return false;
-  if(activeTrack==which)return true;
-  commitActiveTrack();
-  activeTrack=which;samples=tracks[which].pcm;captured=tracks[which].length;
-  return samples!=nullptr;
-}
+bool selectTrack(int which);
 uint8_t waveform[kWaveBins]={};
 float spectrum[kBands]={};
 M5Canvas canvas(&M5.Display);
@@ -120,11 +114,17 @@ bool canvasReady=false,scrollConnected=false,scrollDown=false,scrollShort=false,
 int32_t wheelLast=0;
 uint32_t lastPoll=0,lastProbe=0,lastFrame=0,pressedAt=0,lastBatteryPoll=0;
 uint8_t volumePct=65,brightnessPct=80,batteryPct=0;
-bool charging=false,loopAudio=false,settingsEditing=false,chargeScreenOff=false;
+enum class LoopMode : uint8_t { Off=0, One=1, All=2 };
+LoopMode loopMode=LoopMode::Off;
+void cycleLoopMode(){loopMode=static_cast<LoopMode>((static_cast<uint8_t>(loopMode)+1)%3);}
+bool charging=false,settingsEditing=false,chargeScreenOff=false;
 uint32_t chargeLastInteraction=0;
 bool aWasDown=false,aHoldStarted=false;uint32_t aPressedAt=0;
 int homeSelection=0,settingsSelection=0;
 float playbackSeconds=0.0f;
+// Position in the currently selected clip. 0=all tape on supply, 1=all on take-up.
+float tapePosition=0.0f;
+void persistActiveTrack(){prefs.putUChar("active",uint8_t(activeTrack));}
 float reelWheelNudge=0.0f; // transient reel rotation from idle wheel movement
 uint32_t reelWheelNudgeAt=0;
 uint32_t limitFlashUntil=0;
@@ -135,6 +135,15 @@ State state=State::Idle;
 const char* errorText="";
 constexpr uint16_t BG=0x0841,PANEL=0x18C3,TRIM=0x6B4D,GREEN=0x07E0,LIME=0xBFE0,PURPLE=0xB1BC,YELLOW=0xFFE0,RED=0xF800,MUTED=0xA534,WHITE=0xE71C;
 uint16_t accent(){return speed()<0 ? PURPLE : GREEN;}
+bool selectTrack(int which){
+  if(which<0||which>=kTrackCount)return false;
+  if(activeTrack==which)return true;
+  commitActiveTrack();
+  activeTrack=which;samples=tracks[which].pcm;captured=tracks[which].length;
+  tapePosition=0.0f;persistActiveTrack();
+  return samples!=nullptr;
+}
+
 
 bool readReg(uint8_t reg,uint8_t* out,size_t n){
   Wire.beginTransmission(kScrollAddress);Wire.write(reg);
@@ -241,47 +250,57 @@ void drawDirectionIcon(int x,int y,bool reverse){
   }
 }
 void drawTapeReels(int w){
-  // Recording: fixed rate. Playing: follows signed rate. Idle: wheel turns
-  // impart a brief inertial spin in their actual direction.
-  const int cy=41,r=14;
-  const int centers[2]={w-66,w-27}; // 2px to the right of Phase 4A.4
-  float angularRate=state==State::Recording?1.0f:(state==State::Playing?speed():0.0f);
+  // Both cassette hubs turn counter-clockwise in forward play, clockwise in
+  // reverse. Colored tape rings transfer from left/supply to right/take-up.
+  const int cy=41;
+  const int centers[2]={w-66,w-27};
   const uint32_t now=millis();
-  if(state==State::Idle && now-reelWheelNudgeAt<320)angularRate=reelWheelNudge;
+  float transport=state==State::Recording?1.0f:(state==State::Playing?speed():0.0f);
+  if(state==State::Idle && reelWheelNudgeAt && now-reelWheelNudgeAt<320)
+    transport=reelWheelNudge;
   static float angle=0.0f;
   static uint32_t previous=0;
   if(previous){
     const uint32_t dt=min(uint32_t(100),now-previous);
-    angle+=angularRate*(float(dt)*0.0042f);
+    // Negative angle is counter-clockwise in screen coordinates.
+    angle-=transport*(float(dt)*0.0042f);
   }
   previous=now;
+  const float p=constrain(tapePosition,0.0f,1.0f);
   for(int j=0;j<2;j++){
-    int cx=centers[j];
-    canvas.fillCircle(cx,cy,r,TRIM);
-    canvas.fillCircle(cx,cy,r-2,PANEL);
-    canvas.drawCircle(cx,cy,r-1,WHITE);
-    // Visible opaque black hubs even over the red recording banner.
-    canvas.fillCircle(cx,cy,4,TFT_BLACK);
+    const int cx=centers[j];
+    const uint16_t tint=(now<limitFlashUntil)?RED:accent();
+    // Hub radius 11, with a 2..5px band of magnetic tape outside.
+    // A full supply reel becomes empty as the take-up reel fills.
+    const float fill=j==0?1.0f-p:p;
+    const int outer=13+int(lroundf(fill*3.0f));
+    canvas.fillCircle(cx,cy,outer,tint);
+    canvas.fillCircle(cx,cy,11,PANEL);
+    canvas.drawCircle(cx,cy,11,WHITE);
     for(int k=0;k<3;k++){
       float a=angle+float(k)*2.094395f+float(j)*0.45f;
-      int x0=cx+int(cosf(a)*5),y0=cy+int(sinf(a)*5);
-      int x1=cx+int(cosf(a)*11),y1=cy+int(sinf(a)*11);
-      canvas.drawLine(x0,y0,x1,y1,(now<limitFlashUntil)?RED:accent());
-      // Offset one pixel for stronger spokes, avoiding the central hub.
-      canvas.drawLine(x0+1,y0,x1+1,y1,(now<limitFlashUntil)?RED:accent());
+      int x0=cx+int(cosf(a)*4),y0=cy+int(sinf(a)*4);
+      int x1=cx+int(cosf(a)*9),y1=cy+int(sinf(a)*9);
+      canvas.drawLine(x0,y0,x1,y1,tint);
+      canvas.drawLine(x0+1,y0,x1+1,y1,tint);
     }
+    // Black center remains opaque over the recording banner.
     canvas.fillCircle(cx,cy,3,TFT_BLACK);
-    canvas.fillCircle(cx,cy,1,WHITE);
+    canvas.drawPixel(cx,cy,WHITE);
   }
-  // No horizontal joining line across / beneath the two reels.
 }
 void drawLoopIcon(int x,int y){
-  uint16_t c=loopAudio?LIME:MUTED;
+  const bool enabled=loopMode!=LoopMode::Off;
+  uint16_t c=enabled?LIME:MUTED;
   canvas.drawFastHLine(x+3,y,10,c);canvas.drawFastVLine(x+14,y+1,7,c);
   canvas.drawFastHLine(x+3,y+8,11,c);canvas.drawFastVLine(x+2,y+1,6,c);
-  // Deliberate 1px gap between the tail and arrowhead.
   canvas.fillTriangle(x+11,y-2,x+16,y,x+11,y+2,c);
-  canvas.fillRect(x+19,y+3,3,3,loopAudio?GREEN:0x2131);
+  canvas.fillRect(x+19,y+3,3,3,enabled?GREEN:0x2131);
+  // ON: 1 or A (all). OFF: unlit indicator. Keep transport-row footprint.
+  if(enabled){
+    canvas.setTextSize(1);canvas.setTextColor(LIME,BG);
+    canvas.setCursor(x+24,y+1);canvas.print(loopMode==LoopMode::One?"1":"A");
+  }
 }
 void drawTimeLabel(int right,int y,const char* str){
   // Original 5x9 segment digits: a 1-pixel taller clock than font size 1.
@@ -450,7 +469,7 @@ void drawInfoPage(bool about){
     canvas.setCursor(8,92);canvas.print("Sound-Chomp");
   }else{
     const char* keys[]={"TAP A:","HOLD A:","RELEASE:","WHEEL:","CLICK:","HOLD CLICK:","B:"};
-    const char* descriptions[]={"PLAY / STOP","RECORD","STOP RECORDING","SPEED / REVERSE","PLAY / STOP","LOOP ON / OFF","MENU"};
+    const char* descriptions[]={"PLAY / STOP","RECORD","STOP RECORDING","SPEED / REVERSE","PLAY / STOP","LOOP OFF / 1 / ALL","MENU"};
     for(int i=0;i<7;i++){
       int y=24+i*14;
       canvas.setTextColor(LIME,BG);canvas.setCursor(8,y);canvas.print(keys[i]);
@@ -502,6 +521,7 @@ void handleWheel(int delta){
       }else{
         reelWheelNudge=delta>0?1.7f:-1.7f;
         reelWheelNudgeAt=millis();
+        tapePosition=constrain(tapePosition+0.035f*float(delta),0.0f,1.0f);
       }
     }
     Serial.printf("Rate: %+.2fx (live)\n",speed());
@@ -552,7 +572,7 @@ void openSelection(){
 }
 void recordClip(){
   if(!samples)return;
-  captured=0;tracks[activeTrack].length=0;M5.Speaker.end();
+  captured=0;tracks[activeTrack].length=0;tapePosition=0.0f;M5.Speaker.end();
   if(!M5.Mic.begin()){state=State::Error;errorText="MIC BEGIN FAILED";return;}
   state=State::Recording;setStateLed();clearEvents();draw(true);
   while(captured<kMaxSamples){
@@ -562,7 +582,7 @@ void recordClip(){
       state=State::Error;errorText="MIC RECORD FAILED";break;
     }
     while(M5.Mic.isRecording()){service();draw();delay(1);}
-    captured+=count;analyze(samples,captured,captured-count/2);service();draw();
+    captured+=count;tapePosition=float(captured)/float(kMaxSamples);analyze(samples,captured,captured-count/2);service();draw();
   }
   M5.Mic.end();commitActiveTrack();updateWaveform();if(resetSpeedAfterRecord)resetSpeed();if(state!=State::Error)state=State::Idle;
   if(state==State::Idle){
@@ -583,6 +603,7 @@ void playClip(){
   if(!M5.Speaker.begin()){state=State::Error;errorText="SPEAKER BEGIN FAILED";return;}
   setVolume();state=State::Playing;setStateLed();clearEvents();draw(true);
   double cursor=speed()<0?double(captured-1):0.0;
+  tapePosition=captured?float(cursor)/float(captured):0.0f;
   playbackSeconds=0.0f;
   bool interrupted=false,sourceExhausted=false;
   bool playADown=M5.BtnA.isPressed();uint32_t playAPressed=millis();
@@ -598,7 +619,7 @@ void playClip(){
     if(!buttonDown&&playADown&&millis()-playAPressed<kRecordHoldMs){interrupted=true;break;}
     playADown=buttonDown;
     if(scrollShort){scrollShort=false;interrupted=true;break;}
-    if(scrollLong){scrollLong=false;loopAudio=!loopAudio;}
+    if(scrollLong){scrollLong=false;cycleLoopMode();}
 
     // Only submit when the speaker has a free queue slot. The two-slot
     // queue keeps the following segment ready before the first finishes.
@@ -609,11 +630,25 @@ void playClip(){
       int16_t* output=playChunks[queued%kPlayBuffers];
       size_t count=0;
       bool loopedInChunk=false;
+      size_t samplesSinceBoundary=0;
       for(;count<kPlayChunk;count++){
         if(cursor<0 || cursor>=double(captured)){
-          if(!loopAudio){sourceExhausted=true;break;}
-          cursor=cursor<0?double(captured-1):0.0;
+          if(loopMode==LoopMode::Off){sourceExhausted=true;break;}
+          if(loopMode==LoopMode::All){
+            int next=-1;
+            for(int offset=1;offset<=kTrackCount;offset++){
+              int candidate=(activeTrack+offset)%kTrackCount;
+              if(tracks[candidate].length>0){next=candidate;break;}
+            }
+            if(next<0){sourceExhausted=true;break;}
+            // The queued speaker audio may trail this UI switch by a small
+            // buffer; the playback source itself remains continuous.
+            if(!selectTrack(next)){sourceExhausted=true;break;}
+            updateWaveform();
+          }
+          cursor=rate<0?double(captured-1):0.0;
           loopedInChunk=true;
+          samplesSinceBoundary=0;
         }
         const size_t left=size_t(cursor);
         const size_t right=min(left+1,captured-1);
@@ -621,18 +656,18 @@ void playClip(){
         const float v=samples[left]*(1.0f-frac)+samples[right]*frac;
         output[count]=int16_t(v);
         cursor+=double(rate);
+        ++samplesSinceBoundary;
       }
       if(count){
         if(!M5.Speaker.playRaw(output,count,kSampleRate,false,1,kChannel,false)){
           state=State::Error;errorText="SPEAKER PLAY FAILED";break;
         }
         ++queued;
-        if(loopedInChunk)playbackSeconds=0.0f;
-        playbackSeconds+=float(count)/float(kSampleRate);
-        if(loopAudio){
-          const float duration=float(captured)/float(kSampleRate)/fmaxf(0.5f,fabsf(rate));
-          if(duration>0)playbackSeconds=fmodf(playbackSeconds,duration);
-        }
+        // Reset the transport clock at the exact boundary inside the chunk.
+        // Avoid advancing a whole chunk after a loop or track transition.
+        if(loopedInChunk)playbackSeconds=float(samplesSinceBoundary)/float(kSampleRate);
+        else playbackSeconds+=float(count)/float(kSampleRate);
+        tapePosition=captured?constrain(float(cursor/double(captured)),0.0f,1.0f):0.0f;
         // The Goertzel analysis can be expensive; do it on only every
         // fourth chunk, rather than on every 32ms playback chunk.
         if((chunksMade++%4)==0 && count>=kAnalysisWindow){
@@ -672,10 +707,12 @@ void splash(){
     // Small wordmark; crumble its pixels outwards when the jaws meet.
     const uint32_t impactAt=365;
     const bool afterImpact=elapsed>=impactAt;
-    const int tx=max(0,w/2-57),ty=h/2-6;
+    // textSize(2) = 12px per character; center using measured width.
+    const char* splashTitle="SOUND-CHOMP";
+    const int tx=(w-int(strlen(splashTitle))*12)/2,ty=h/2-8;
     if(!afterImpact){
-      canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);
-      canvas.setCursor(tx,ty);canvas.print("SOUND-CHOMP");
+      canvas.setTextSize(2);canvas.setTextColor(WHITE,BG);
+      canvas.setCursor(tx,ty);canvas.print(splashTitle);
     }else{
       const int spread=min(32,int((elapsed-impactAt)/11));
       for(int i=0;i<60;i++){
@@ -706,12 +743,14 @@ void setup(){
     t.pcm=static_cast<int16_t*>(heap_caps_malloc(kMaxSamples*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
     t.length=0;
   }
-  samples=tracks[0].pcm;
+  activeTrack=constrain(int(prefs.getUChar("active",0)),0,kTrackCount-1);
+  trackSelection=activeTrack;
+  samples=tracks[activeTrack].pcm;
   // The existing 8 MB partition scheme reserves the final ~1.5 MB for a filesystem.
   // WARNING: format-on-failure initializes an unformatted filesystem on first use.
   // It can erase pre-existing incompatible filesystem data in that partition.
   storageReady=LittleFS.begin(true);
-  if(storageReady){loadTracks();captured=tracks[0].length;}
+  if(storageReady){loadTracks();captured=tracks[activeTrack].length;}
   else Serial.println("LittleFS mount failed: RAM-only operation; no persistent storage");
   for(auto& b:playChunks)b=static_cast<int16_t*>(heap_caps_malloc(kPlayChunk*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   bool audioBuffersReady=true;for(const auto& t:tracks)audioBuffersReady=audioBuffersReady&&(t.pcm!=nullptr);for(auto* b:playChunks)audioBuffersReady=audioBuffersReady&&(b!=nullptr);
@@ -720,7 +759,7 @@ void setup(){
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateWaveform();updateBattery();
-  Serial.println("Sound-Chomp Phase 4C - four-track flash storage prototype");splash();draw(true);
+  Serial.println("Sound-Chomp Phase 4D - persistent selected track and tape reels");splash();draw(true);
 }
 void loop(){
   service();
@@ -745,7 +784,7 @@ void loop(){
     }
     aWasDown=down;
     if(state==State::Idle&&scrollShort){scrollShort=false;playClip();}
-    if(scrollLong){loopAudio=!loopAudio;scrollLong=false;}
+    if(scrollLong){cycleLoopMode();scrollLong=false;}
   }else if(page==Page::Tracks){
     if(trackDeleteConfirm){
       if(scrollShort||M5.BtnA.wasPressed()){

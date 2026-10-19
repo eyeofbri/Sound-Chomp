@@ -68,3 +68,9 @@ See `docs/phase4a4-transport.md` for details and a test checklist.
 - Playback timer now wraps for looping, alongside minor banner, icon and splash polish.
 
 See `docs/phase4b-tracks.md` for full controls, technical notes, and verification checklist.
+
+### Phase 4D prototype
+
+Phase 4D adds last-selected-track persistence, three loop modes (OFF / 1 / ALL),
+and tape-transfer reel animation. See [Phase 4D test notes](docs/phase4d-tape-transfer.md).
+This is an unverified development package; use the last tested Phase 4C build for rollback.

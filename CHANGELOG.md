@@ -84,3 +84,11 @@ This is a source prototype, not yet compiled or hardware validated.
 - Add Charge screen with battery gauge and screen-off timer.
 - Color-key How To help, Built for Aiden credit, and other player layout refinements.
 - Preserve the proven three-buffer speaker playback pipeline.
+
+## Unreleased — Phase 4D tape-transfer transport
+
+- Remember and restore the selected recording slot with Preferences.
+- Cycle LOOP OFF, LOOP 1, and LOOP ALL with a long scroll press; skip empty tracks in LOOP ALL.
+- Center and enlarge the splash title while retaining the two-jaw pixel crumble.
+- Render tape transfer with variable colored reel rings and correct rotation directions.
+- Preserve Phase 4C's LittleFS clip format and three-buffer playback.
