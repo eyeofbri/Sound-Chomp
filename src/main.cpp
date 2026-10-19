@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 5A: live non-destructive echo and wheel control modes.
+// Sound-Chomp Phase 5B: Winamp-style focused transport controls.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -29,10 +29,15 @@ size_t echoHead=0;
 uint8_t echoWet=35;
 uint16_t echoDelayMs=250;
 bool echoEnabled=false;
-enum class WheelMode:uint8_t{Speed,Echo};
-WheelMode wheelMode=WheelMode::Speed;
+constexpr const char* kFirmwareVersion="v0.6.0-dev";
+enum class PlayerFocus:uint8_t{Play=0,Speed=1,EchoToggle=2,EchoLevel=3,EchoDelay=4,Loop=5};
+PlayerFocus playerFocus=PlayerFocus::Play;
+void advancePlayerFocus(){playerFocus=static_cast<PlayerFocus>((static_cast<int>(playerFocus)+1)%6);}
+
 int effectsSelection=0;
 bool effectsEditing=false;
+bool effectPreferenceDirty=false;
+uint32_t effectPreferenceChangedAt=0;
 int16_t applyEcho(int16_t dry){
   if(!echoHistory)return dry;
   const size_t delaySamples=size_t(echoDelayMs)*kSampleRate/1000;
@@ -383,45 +388,94 @@ void drawWaveform(int left,int top,int width,int height){
     if(marker>=0&&marker<width)canvas.drawFastVLine(left+marker,top,height,YELLOW);
   }
 }
+// A compact two-tier, six-button transport strip; all geometry fits 240x135.
+void drawTransportButtons(int w,int h){
+  const char* labels[]={"PLAY","SPEED","FX-1","FX-2","FX-3","LOOP"};
+  const int x0=5, gap=1, rightReserve=41;
+  const int bw=(w-2*x0-rightReserve-5*gap)/6;
+  const int y=h-30, bh=27;
+  for(int i=0;i<6;i++){
+    const int x=x0+i*(bw+gap);
+    const bool selected=int(playerFocus)==i;
+    const uint16_t surface=selected?0x2185:PANEL;
+    canvas.fillRect(x,y,bw,bh,surface);
+    canvas.drawRect(x,y,bw,bh,selected?LIME:TRIM);
+    canvas.drawFastHLine(x+1,y+1,bw-2,selected?WHITE:MUTED);
+    canvas.fillCircle(x+bw-5,y+5,2,selected?GREEN:0x10A2);
+    const uint16_t c=selected?LIME:WHITE;
+    const int cx=x+bw/2;
+    if(i==0){
+      // Transport triangle
+      canvas.fillTriangle(cx-4,y+6,cx-4,y+15,cx+4,y+10,c);
+    }else if(i==1){
+      canvas.fillTriangle(cx-7,y+7,cx-7,y+14,cx-1,y+10,c);
+      canvas.fillTriangle(cx,y+7,cx,y+14,cx+6,y+10,c);
+    }else if(i>=2&&i<=4){
+      for(int j=0;j<5;j++){
+        const int ht=(j==2?9:(j==1||j==3?6:3));
+        canvas.fillRect(cx-9+j*4,y+16-ht,3,ht,c);
+      }
+    }else{
+      // Circular arrow for loop, green/dark-blue lamp at top right
+      canvas.drawFastHLine(cx-6,y+8,10,c);
+      canvas.drawFastVLine(cx+4,y+8,6,c);
+      canvas.drawFastHLine(cx-5,y+15,10,c);
+      canvas.drawFastVLine(cx-6,y+9,5,c);
+      canvas.fillTriangle(cx+3,y+6,cx+8,y+8,cx+3,y+10,c);
+    }
+    canvas.setTextSize(1);canvas.setTextColor(c,surface);
+    canvas.setCursor(x+(bw-int(strlen(labels[i]))*6)/2,y+19);canvas.print(labels[i]);
+    if(i==5)canvas.fillRect(x+2,y+2,3,3,loopMode==LoopMode::Off?0x1027:GREEN);
+  }
+  canvas.fillRect(w-42,y,37,bh,PANEL);
+  canvas.drawRect(w-42,y,37,bh,TRIM);
+  const float shownTime=state==State::Playing?playbackSeconds:
+      captured?float(captured)/kSampleRate/fmaxf(0.1f,fabsf(speed())):0.0f;
+  char timeBuf[16];snprintf(timeBuf,sizeof timeBuf,"%.1fs",double(shownTime));
+  canvas.setTextSize(1);canvas.setTextColor(WHITE,PANEL);
+  canvas.setCursor(w-40,y+10);canvas.print(timeBuf);
+}
 void drawChomp(){
   const int w=canvas.width(),h=canvas.height();
-  // LEFT status column leaves free space for future functionality.
   if(state==State::Recording){
-    canvas.fillRect(5,22,w-10,39,RED); // extends behind the reels; ends 1px above analyzer border
-    // 2 Hz flash: black circle on alternating half-cycles.
+    canvas.fillRect(5,22,w-10,39,RED);
     const bool flash=(millis()/250)%2==0;
     canvas.fillCircle(17,36,6,TFT_BLACK);
     if(flash)canvas.fillCircle(17,36,4,RED);
     canvas.setTextSize(2);canvas.setTextColor(TFT_BLACK,RED);
     canvas.setCursor(29,29);canvas.print("RECORDING");
   }else{
-    const char* status=state==State::Playing?"PLAY":state==State::Error?"ERROR":"READY";
+    const char* heading=state==State::Error?"ERROR":state==State::Playing?"PLAYING":"READY";
+    // Contextual heading while idle; always show PLAYING while the motor runs.
+    if(state==State::Idle){
+      const char* names[]={"READY","SPEED","ECHO","ECHO LVL","ECHO DLY","LOOP"};
+      heading=names[int(playerFocus)];
+    }
     canvas.setTextSize(2);canvas.setTextColor(accent(),BG);
-    canvas.setCursor(8,22);canvas.print(status);
-    canvas.setTextSize(2);canvas.setTextColor(accent(),BG);
-    canvas.setCursor(8,43);
-    if(wheelMode==WheelMode::Speed)canvas.printf("%+.1fx",double(speed()));
-    else {canvas.setTextSize(1);canvas.setTextColor(YELLOW,BG);canvas.printf("ECHO %u%% %s",unsigned(echoWet),echoEnabled?"ON":"OFF");}
-    // Colored pixel indicates which parameter the Unit Scroll adjusts.
-    canvas.fillRect(4,55,3,3,wheelMode==WheelMode::Echo?YELLOW:accent());
+    canvas.setCursor(8,22);canvas.print(heading);
+    canvas.setTextSize(1);canvas.setTextColor(playerFocus==PlayerFocus::Speed?accent():WHITE,BG);
+    canvas.setCursor(9,47);
+    switch(playerFocus){
+      case PlayerFocus::Play: canvas.printf("%+.1fx  CHOMP %02d",double(speed()),activeTrack+1);break;
+      case PlayerFocus::Speed: canvas.printf("%+.1fx",double(speed()));break;
+      case PlayerFocus::EchoToggle: canvas.print(echoEnabled?"ECHO ON":"ECHO OFF");break;
+      case PlayerFocus::EchoLevel: canvas.printf("ECHO %u%%",unsigned(echoWet));break;
+      case PlayerFocus::EchoDelay: canvas.printf("%ums",unsigned(echoDelayMs));break;
+      case PlayerFocus::Loop:
+        if(loopMode==LoopMode::Off)canvas.print("LOOP OFF");
+        else if(loopMode==LoopMode::One)canvas.print("LOOP 1");
+        else canvas.printf("ALL (%d)",activeTrack+1);
+        break;
+    }
   }
   drawTapeReels(w);
-  const int left=8,top=65,vw=w-16,vh=max(12,h-90);
+  const int left=8,top=65,vw=w-16,vh=max(12,h-106);
   canvas.drawRect(left-2,top-3,vw+4,vh+6,TRIM);
   canvas.fillRect(left,top,vw,vh,PANEL);
-  if(state==State::Recording)drawSpectrum(left,top,vw,vh);
-  else if(state==State::Playing)drawSpectrum(left,top,vw,vh);
+  if(state==State::Playing||state==State::Recording)drawSpectrum(left,top,vw,vh);
   else drawWaveform(left,top,vw,vh);
-  // Fixed bottom transport row; aligns time with battery right edge.
-  const int rowY=h-16;
-  drawDirectionIcon(9,rowY+2,speed()<0);
-  drawLoopIcon(45,rowY+2);
-  canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);
-  const float shownTime=state==State::Playing?playbackSeconds:
-      captured?float(captured)/kSampleRate/fmaxf(0.1f,fabsf(speed())):0.0f;
-  char timeBuf[17];snprintf(timeBuf,sizeof timeBuf,"%.1fs",double(shownTime));
-  drawTimeLabel(w-7,rowY-1,timeBuf);
-  if(state==State::Error){canvas.setTextColor(RED,BG);canvas.setCursor(85,48);canvas.print(errorText);}
+  drawTransportButtons(w,h);
+  if(state==State::Error){canvas.setTextColor(RED,BG);canvas.setTextSize(1);canvas.setCursor(88,51);canvas.print(errorText);}
 }
 void drawMenuIcon(int x,int y,int index,uint16_t color){
   // Small, original 9x9 pixel symbols; distinguishable without reading.
@@ -495,14 +549,14 @@ void drawSettings(){
 void drawInfoPage(bool about){
   canvas.setTextSize(1);canvas.setTextColor(LIME,BG);
   if(about){
-    canvas.setCursor(8,29);canvas.print("SOUND-CHOMP v0.5.0-dev");
+    canvas.setCursor(8,29);canvas.print("SOUND-CHOMP ");canvas.print(kFirmwareVersion);
     canvas.setTextColor(WHITE,BG);canvas.setCursor(8,47);canvas.print("BUILT BY u/eyeofbri");
     canvas.setCursor(8,65);canvas.print("BUILT FOR AIDEN");
     canvas.setCursor(8,82);canvas.print("github.com/eyeofbri/");
     canvas.setCursor(8,92);canvas.print("Sound-Chomp");
   }else{
     const char* keys[]={"TAP A:","HOLD A:","RELEASE:","WHEEL:","CLICK:","HOLD CLICK:","B:"};
-    const char* descriptions[]={"PLAY / STOP","RECORD","STOP RECORDING","SPEED / ECHO","SWITCH MODE","LOOP OFF / 1 / ALL","MENU"};
+    const char* descriptions[]={"PLAY / STOP","RECORD","STOP RECORDING","ADJUST / NAV","PLAY / NEXT","FOCUS PLAY","MENU"};
     for(int i=0;i<7;i++){
       int y=24+i*14;
       canvas.setTextColor(LIME,BG);canvas.setCursor(8,y);canvas.print(keys[i]);
@@ -553,29 +607,34 @@ void draw(bool force=false){
   else if(page==Page::Effects)drawEffects();else if(page==Page::Charge)drawCharge();else drawInfoPage(page==Page::About);
   canvas.pushSprite(0,0);
 }
+void saveEchoSettings();
+void markEchoSettingsDirty(){effectPreferenceDirty=true;effectPreferenceChangedAt=millis();}
 void handleWheel(int delta){
   if(page==Page::Home)homeSelection=constrain(homeSelection+delta,0,6);
   else if(page==Page::Tracks){trackSelection=constrain(trackSelection+delta,0,kTrackCount-1);trackDeleteConfirm=false;}
   else if(page==Page::Chomp){
-    if(wheelMode==WheelMode::Echo){
-      echoWet=uint8_t(constrain(int(echoWet)+delta*5,0,100));
-      Serial.printf("Echo wet: %u%%\n",unsigned(echoWet));
-      return;
-    }
-    const int before=speedIndex;
-    speedIndex=constrain(speedIndex+delta,0,kSpeedCount-1);
-    if(state==State::Idle){
-      if(speedIndex==before){
-        reelWheelNudge=0;
-        reelWheelNudgeAt=0;
-        limitFlashUntil=millis()+220;
-      }else{
-        reelWheelNudge=delta>0?1.7f:-1.7f;
-        reelWheelNudgeAt=millis();
-        tapePosition=constrain(tapePosition+0.035f*float(delta),0.0f,1.0f);
+    if(playerFocus==PlayerFocus::Play){
+      // From PLAY, turning the wheel navigates controls rather than altering audio.
+      const int next=constrain(int(playerFocus)+(delta>0?1:-1),0,5);
+      playerFocus=static_cast<PlayerFocus>(next);
+    }else if(playerFocus==PlayerFocus::Speed){
+      const int before=speedIndex;
+      speedIndex=constrain(speedIndex+delta,0,kSpeedCount-1);
+      if(state==State::Idle){
+        if(speedIndex==before){reelWheelNudge=0;reelWheelNudgeAt=0;limitFlashUntil=millis()+220;}
+        else {reelWheelNudge=delta>0?1.7f:-1.7f;reelWheelNudgeAt=millis();tapePosition=constrain(tapePosition+0.035f*float(delta),0.0f,1.0f);}
       }
+    }else if(playerFocus==PlayerFocus::EchoToggle){
+      if(delta)echoEnabled=delta>0;
+      markEchoSettingsDirty();
+    }else if(playerFocus==PlayerFocus::EchoLevel){
+      echoWet=uint8_t(constrain(int(echoWet)+delta*5,0,100));markEchoSettingsDirty();
+    }else if(playerFocus==PlayerFocus::EchoDelay){
+      echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*kEchoStepMs,kEchoMinMs,kEchoMaxMs));markEchoSettingsDirty();
+    }else if(playerFocus==PlayerFocus::Loop){
+      int value=constrain(int(loopMode)+(delta>0?1:-1),0,2);
+      loopMode=static_cast<LoopMode>(value);
     }
-    Serial.printf("Rate: %+.2fx (live)\n",speed());
   }else if(page==Page::Effects){
     if(effectsEditing){
       if(effectsSelection==0&&delta)echoEnabled=delta>0;
@@ -654,6 +713,15 @@ void recordClip(){
 // IMPORTANT: keep a queue of audio ahead of the speaker, and do not modify
 // a buffer until at least two other buffers have been submitted. M5Unified
 // documents three rotating buffers as a safe strategy for generated audio.
+// During playback PLAY-click stops, all other clicks advance focus.
+void handlePlayingWheelClick(bool& interrupted){
+  if(scrollLong){scrollLong=false;playerFocus=PlayerFocus::Play;}
+  if(scrollShort){
+    scrollShort=false;
+    if(playerFocus==PlayerFocus::Play)interrupted=true;
+    else advancePlayerFocus();
+  }
+}
 void playClip(){
   if(!captured||!samples)return;
   for(auto* b:playChunks)if(!b)return;
@@ -677,8 +745,8 @@ void playClip(){
     if(buttonDown&&!playADown)playAPressed=millis();
     if(!buttonDown&&playADown&&millis()-playAPressed<kRecordHoldMs){interrupted=true;break;}
     playADown=buttonDown;
-    if(scrollShort){scrollShort=false;wheelMode=wheelMode==WheelMode::Speed?WheelMode::Echo:WheelMode::Speed;draw(true);}
-    if(scrollLong){scrollLong=false;cycleLoopMode();}
+    handlePlayingWheelClick(interrupted);
+    if(interrupted)break;
 
     // Only submit when the speaker has a free queue slot. The two-slot
     // queue keeps the following segment ready before the first finishes.
@@ -823,11 +891,14 @@ void setup(){
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateWaveform();updateBattery();
-  Serial.println("Sound-Chomp Phase 5A - live echo prototype");splash();draw(true);
+  Serial.println("Sound-Chomp Phase 5B - focused player transport");splash();draw(true);
 }
 void loop(){
   service();
-  if(M5.BtnB.wasPressed()&&page!=Page::Home){
+  if(effectPreferenceDirty && millis()-effectPreferenceChangedAt>1200){saveEchoSettings();effectPreferenceDirty=false;}
+  if(M5.BtnB.wasPressed()&&page==Page::Home){
+    page=Page::Chomp;playerFocus=PlayerFocus::Play;clearEvents();draw(true);
+  }else if(M5.BtnB.wasPressed()&&page!=Page::Home){
     if(page==Page::Tracks&&trackDeleteConfirm){trackDeleteConfirm=false;draw(true);}
     else backHome();
   }
@@ -847,8 +918,12 @@ void loop(){
       playClip();
     }
     aWasDown=down;
-    if(state==State::Idle&&scrollShort){scrollShort=false;wheelMode=wheelMode==WheelMode::Speed?WheelMode::Echo:WheelMode::Speed;draw(true);}
-    if(scrollLong){cycleLoopMode();scrollLong=false;}
+    if(state==State::Idle&&scrollShort){
+      scrollShort=false;
+      if(playerFocus==PlayerFocus::Play)playClip();
+      else advancePlayerFocus();
+    }
+    if(scrollLong){playerFocus=PlayerFocus::Play;scrollLong=false;}
   }else if(page==Page::Tracks){
     if(trackDeleteConfirm){
       if(scrollShort||M5.BtnA.wasPressed()){

@@ -1,3 +1,5 @@
+> **Phase 5B development candidate (`v0.6.0-dev`):** Focusable PLAY/SPEED/FX-1/FX-2/FX-3/LOOP player controls, Winamp-inspired transport strip, Main Menu B navigation, and versioned splash. See [Phase 5B guide](docs/phase5b-player-controls.md). This candidate has not been compiled or hardware-tested.
+
 > **Phase 4C development prototype:** Four RAM-backed tracks now save to LittleFS and reload after reboot. See [persistent storage notes](docs/phase4c-persistent-tracks.md) for important first-run formatting warnings and limitations.
 
 # Sound-Chomp

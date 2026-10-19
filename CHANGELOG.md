@@ -1,3 +1,11 @@
+## Unreleased — Phase 5B (`v0.6.0-dev`)
+
+- Add bottom six-control focus strip with PLAY, SPEED, FX-1, FX-2, FX-3, LOOP.
+- Scroll click on PLAY toggles playback; other focused buttons click to next function.
+- Scroll long-click returns to PLAY; wheel changes the focused parameter.
+- Update contextual player readouts, `PLAYING` status, home B behavior, and startup version.
+- Preserve persistent tracks, LittleFS, playback buffers and non-destructive echo.
+
 ## Unreleased — Phase 4C Persistent Tracks
 
 - Save four PCM recordings to LittleFS and restore at startup.
