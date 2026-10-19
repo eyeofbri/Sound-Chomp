@@ -139,3 +139,20 @@ This is a source prototype, not yet compiled or hardware validated.
 - Remove opaque backgrounds behind transport controls.
 - Expand landscape transport widths and recenter the seven-segment timer.
 - Show live playback rate on speed control and hide battery percentage in portrait.
+
+## Unreleased — Phase 5D (atlas and themes)
+- Add three four-role palettes (GREEN/RED/BLUE) and persist user choice.
+- Complete atlas rendering for FX icons and custom time glyphs; conditionally use atlas frames when they fit.
+- Improve native-size reel cover and constrain tape-fill circles behind its windows.
+- Use retro bitmap backgrounds only in player; menus return to neutral surfaces.
+- Automatically regenerate UI assets during PlatformIO builds using the Python standard library.
+- The four recorded tracks and audio effects processing are unchanged.
+
+## Unreleased — Phase 5D.1 (player micro-refinements)
+- Restore the earlier Phase 4D procedural reels with circular colored tape bands, clean rotating spokes, and black centers; atlas reel artwork stays available for later edits but is not rendered by the player.
+- Replace duplicate speed and multi-line echo details with one compact status line containing direction, track, enabled FX1, and loop state.
+- Center the portrait recording dot and REC label as a unit; adjust READY / PLAYING status down by 1px.
+- Give landscape transport buttons an additional pixel of width without changing icon or text sizes, and shift Play/Pause icon down 1px.
+- Remove the timer border, using warning color while idle and active color during playback.
+- Remove the low-contrast menu selection fills; retain themed focus borders.
+- Move the charging indicator pixel inside the battery frame to prevent the white/bright pixel above the battery.

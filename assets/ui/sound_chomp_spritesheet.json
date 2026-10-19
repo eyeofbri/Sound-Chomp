@@ -4,15 +4,15 @@
     "width": 512,
     "height": 512,
     "pixel_scale": 1,
-    "version": "1.1.0",
+    "version": "1.2.0",
     "format": "RGBA8888",
     "coordinate_origin": "top-left",
     "rectangles": "zero-based; x/y inclusive, right/bottom exclusive",
-    "firmware_baseline": "Phase 5B.3",
+    "firmware_baseline": "Phase 5D",
     "guide_border_rule": "A 1px #FF00FF guide border may surround a sprite outside its crop rect. The guide border is never part of the firmware crop.",
     "theme_keys": {
-      "#FF00FF": "primary_accent",
-      "#00FFFF": "secondary_accent_reserved"
+      "#FF00FF": "theme.primary",
+      "#00FFFF": "theme.secondary"
     },
     "note": "Background PNGs are exact copies. Dynamic code shapes are reconstructed; firmware is NOT yet wired to consume this atlas. Magenta inside a sprite rect is an intentional theme-replaceable key color."
   },
@@ -314,7 +314,7 @@
       "type": "icon",
       "mode": "mixed",
       "guide_border": 1,
-      "notes": "outer reel overlay; draw tape fill by code behind the transparent window areas"
+      "notes": "22x22 native reel cover. Transparent open windows expose code-drawn tape. No scaling."
     },
     "digit_0": {
       "x": 246,

@@ -94,3 +94,7 @@ Four stored recordings and track selection survive device restarts. Echo prefere
 ## Canonical pixel artwork
 
 Phase 5C now renders selected UI elements from `assets/ui/sound_chomp_spritesheet.png`. Edit the atlas and run `python tools/generate_ui_assets.py` to regenerate `include/generated/ui_assets.h`. See `docs/phase5c-atlas-integration.md`.
+
+### Atlas-based UI workflow (Phase 5D development)
+
+Edit the source PNG at `assets/ui/sound_chomp_spritesheet.png`; keep the crop regions fixed in `sound_chomp_spritesheet.json`. PlatformIO runs `tools/platformio_prebuild.py` automatically and regenerates `include/generated/ui_assets.h` before compilation. No separate command or Pillow installation is required. See `docs/phase5d-atlas-themes.md` for palette values, remaining procedural UI, and testing details.

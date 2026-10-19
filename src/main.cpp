@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 5B.3: Winamp-style controls, effects and adaptive layout.
+// Sound-Chomp Phase 5D: Winamp-style controls, effects and adaptive layout.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -30,7 +30,7 @@ size_t echoHead=0;
 uint8_t echoWet=35;
 uint16_t echoDelayMs=250;
 bool echoEnabled=false;
-constexpr const char* kFirmwareVersion="v0.6.0-dev";
+constexpr const char* kFirmwareVersion="v0.7.0-dev";
 enum class PlayerFocus:uint8_t{Play=0,Speed=1,EchoToggle=2,FutureFx2=3,FutureFx3=4,Loop=5};
 PlayerFocus playerFocus=PlayerFocus::Play;
 bool playerEditing=false; // Green selection -> amber adjustment
@@ -162,7 +162,7 @@ bool charging=false,settingsEditing=false,chargeScreenOff=false;
 uint32_t chargeLastInteraction=0;
 bool aWasDown=false,aHoldStarted=false;uint32_t aPressedAt=0;
 int homeSelection=0,settingsSelection=0;
-uint8_t themeSelection=0; // 0=classic lime, 1=cyan, 2=amber, 3=pink
+uint8_t themeSelection=0; // 0=GREEN, 1=RED, 2=BLUE
 float playbackSeconds=0.0f;
 // Position in the currently selected clip. 0=all tape on supply, 1=all on take-up.
 float tapePosition=0.0f;
@@ -176,11 +176,17 @@ Page page=Page::Chomp;
 State state=State::Idle;
 const char* errorText="";
 constexpr uint16_t BG=0x0841,PANEL=0x18C3,TRIM=0x6B4D,GREEN=0x07E0,LIME=0xBFE0,PURPLE=0xB1BC,YELLOW=0xFFE0,RED=0xF800,MUTED=0xA534,WHITE=0xE71C;
-uint16_t themeAccent(){
-  static constexpr uint16_t colors[]={GREEN,0x07FF,0xFD20,0xF81F};
-  return colors[constrain(int(themeSelection),0,3)];
-}
-uint16_t accent(){return speed()<0 ? PURPLE : themeAccent();}
+// Four logical RGB565 theme roles. The secondary is used for reverse mode.
+struct UiTheme {uint16_t primary,secondary,warning,active;const char* name;};
+constexpr uint16_t rgb565(uint8_t r,uint8_t g,uint8_t b){return uint16_t((r>>3)<<11)|uint16_t((g>>2)<<5)|uint16_t(b>>3);}
+static constexpr UiTheme kThemes[]={
+  {rgb565(0,255,0),rgb565(255,0,255),rgb565(255,255,0),rgb565(255,153,0),"GREEN"},
+  {rgb565(255,0,0),rgb565(0,255,174),rgb565(255,255,0),rgb565(255,153,0),"RED"},
+  {rgb565(0,255,247),rgb565(255,0,68),rgb565(255,255,0),rgb565(255,153,0),"BLUE"},
+};
+const UiTheme& palette(){return kThemes[constrain(int(themeSelection),0,2)];}
+uint16_t themeAccent(){return palette().primary;}
+uint16_t accent(){return speed()<0?palette().secondary:palette().primary;}
 bool selectTrack(int which){
   if(which<0||which>=kTrackCount)return false;
   if(activeTrack==which)return true;
@@ -242,7 +248,8 @@ void updateBattery(){
 }
 // Canonical sprite drawing: exact image pixels, guide borders excluded at export.
 // Transparent=skip, opaque #FF00FF=theme primary, #00FFFF=secondary.
-void drawAtlasSprite(const ChompArt::Sprite& sprite,int x,int y,uint16_t primary,uint16_t secondary=WHITE){
+void drawAtlasSprite(const ChompArt::Sprite& sprite,int x,int y,uint16_t primary,uint16_t secondary=0){
+  if(!secondary)secondary=palette().secondary;
   for(int py=0;py<sprite.h;++py){
     for(int px=0;px<sprite.w;++px){
       const uint32_t c=sprite.pixels[py*sprite.w+px];
@@ -266,7 +273,7 @@ void drawRotatedAtlasReel(int cx,int cy,float angle,uint16_t primary){
     const uint32_t c=sprite.pixels[sy*sprite.w+sx];
     if(!c)continue;
     canvas.drawPixel(cx+ox-int(hx+0.5f),cy+oy-int(hy+0.5f),
-       c==0x10000?primary:(c==0x20000?WHITE:uint16_t(c&0xffff)));
+       c==0x10000?primary:(c==0x20000?palette().secondary:uint16_t(c&0xffff)));
   }
 }
 void drawTeeth(int x,int y){
@@ -275,18 +282,18 @@ void drawTeeth(int x,int y){
 void drawHeader(const char* title){
   int w=canvas.width();
   canvas.fillRect(2,2,w-4,17,PANEL);
-  canvas.setTextSize(1);canvas.setTextColor(LIME,PANEL);canvas.setCursor(24,7);canvas.print("SOUND-CHOMP");
+  canvas.setTextSize(1);canvas.setTextColor(themeAccent(),PANEL);canvas.setCursor(24,7);canvas.print("SOUND-CHOMP");
   drawTeeth(7,5);
   int batteryX=w-22;
-  canvas.drawRect(batteryX,7,15,8,WHITE);
-  canvas.fillRect(batteryX-3,9,3,4,WHITE); // battery terminal on left
-  canvas.fillRect(batteryX+2,9,(batteryPct*11)/100,4,batteryPct<20?RED:GREEN);
+  canvas.drawRect(batteryX,7,15,8,themeAccent());
+  canvas.fillRect(batteryX-3,9,3,4,themeAccent()); // battery terminal on left
+  canvas.fillRect(batteryX+2,9,(batteryPct*11)/100,4,batteryPct<20?palette().warning:themeAccent());
   // Portrait title needs the entire width; omit battery percentage there.
   if(canvas.width()>canvas.height()){
-    canvas.setTextColor(WHITE,PANEL);canvas.setCursor(batteryX-31,7);
+    canvas.setTextColor(themeAccent(),PANEL);canvas.setCursor(batteryX-31,7);
     canvas.printf("%u%%",unsigned(batteryPct));
   }
-  if(charging)canvas.drawPixel(batteryX+5,6,YELLOW);
+  if(charging)canvas.drawPixel(batteryX+5,9,palette().warning);
 }
 void drawSpectrum(int left,int top,int width,int height){
   const int stride=max(3,width/kBands);
@@ -297,7 +304,7 @@ void drawSpectrum(int left,int top,int width,int height){
     // Winamp-style amplitude thresholds, mostly green.
     for(int yy=0;yy<h;yy+=4){
       float frac=float(yy)/float(height);
-      uint16_t color=frac>0.89f?RED:(frac>0.72f?YELLOW:accent());
+      uint16_t color=frac>0.89f?palette().warning:(frac>0.72f?palette().active:accent());
       canvas.fillRect(x,top+height-2-yy,stride-2,min(3,h-yy),color);
     }
   }
@@ -320,9 +327,9 @@ void drawDirectionIcon(int x,int y,bool reverse){
 void drawTapeReels(int w){
   // Both cassette hubs turn counter-clockwise in forward play, clockwise in
   // reverse. Colored tape rings transfer from left/supply to right/take-up.
-  const int cy=canvas.height()>canvas.width()?75:41;
-  const bool vertical=canvas.height()>canvas.width();
-  const int centers[2]={vertical?w/2-21:w-66,vertical?w/2+21:w-27};
+  const bool portrait=canvas.height()>canvas.width();
+  const int cy=portrait?75:41;
+  const int centers[2]={portrait?w/2-21:w-66,portrait?w/2+21:w-27};
   const uint32_t now=millis();
   float transport=state==State::Recording?1.0f:(state==State::Playing?speed():0.0f);
   if(state==State::Idle && reelWheelNudgeAt && now-reelWheelNudgeAt<320)
@@ -338,52 +345,58 @@ void drawTapeReels(int w){
   const float p=constrain(tapePosition,0.0f,1.0f);
   for(int j=0;j<2;j++){
     const int cx=centers[j];
-    const uint16_t tint=(now<limitFlashUntil)?RED:accent();
-    // Animated tape mass behind the rotating cover, exposed through its windows.
+    const uint16_t tint=(now<limitFlashUntil)?palette().warning:accent();
+    // Hub radius 11, with a 2..5px band of magnetic tape outside.
+    // A full supply reel becomes empty as the take-up reel fills.
     const float fill=j==0?1.0f-p:p;
-    const int radius=7+int(lroundf(fill*9.0f));
-    canvas.fillCircle(cx,cy,radius,tint);
-    drawRotatedAtlasReel(cx,cy,angle+float(j)*0.45f,tint);
-
+    const int outer=13+int(lroundf(fill*3.0f));
+    canvas.fillCircle(cx,cy,outer,tint);
+    canvas.fillCircle(cx,cy,11,PANEL);
+    canvas.drawCircle(cx,cy,11,WHITE);
+    for(int k=0;k<3;k++){
+      float a=angle+float(k)*2.094395f+float(j)*0.45f;
+      int x0=cx+int(cosf(a)*4),y0=cy+int(sinf(a)*4);
+      int x1=cx+int(cosf(a)*9),y1=cy+int(sinf(a)*9);
+      canvas.drawLine(x0,y0,x1,y1,tint);
+      canvas.drawLine(x0+1,y0,x1+1,y1,tint);
+    }
+    // Black center remains opaque over the recording banner.
+    canvas.fillCircle(cx,cy,3,TFT_BLACK);
+    canvas.drawPixel(cx,cy,WHITE);
   }
 }
+
 void drawLoopIcon(int x,int y){
   const bool enabled=loopMode!=LoopMode::Off;
-  uint16_t c=enabled?LIME:MUTED;
+  uint16_t c=enabled?themeAccent():MUTED;
   canvas.drawFastHLine(x+3,y,10,c);canvas.drawFastVLine(x+14,y+1,7,c);
   canvas.drawFastHLine(x+3,y+8,11,c);canvas.drawFastVLine(x+2,y+1,6,c);
   canvas.fillTriangle(x+11,y-2,x+16,y,x+11,y+2,c);
-  canvas.fillRect(x+19,y+3,3,3,enabled?GREEN:0x2131);
+  canvas.fillRect(x+19,y+3,3,3,enabled?palette().active:0x2131);
   // ON: 1 or A (all). OFF: unlit indicator. Keep transport-row footprint.
   if(enabled){
-    canvas.setTextSize(1);canvas.setTextColor(LIME,BG);
+    canvas.setTextSize(1);canvas.setTextColor(themeAccent(),BG);
     canvas.setCursor(x+24,y+1);
     if(loopMode==LoopMode::One)canvas.print("1");
     else canvas.printf("ALL(%d)",activeTrack+1);
   }
 }
+const ChompArt::Sprite& timerSprite(char c){
+ switch(c){
+ case '0':return ChompArt::Digit0;case '1':return ChompArt::Digit1;case '2':return ChompArt::Digit2;
+ case '3':return ChompArt::Digit3;case '4':return ChompArt::Digit4;case '5':return ChompArt::Digit5;
+ case '6':return ChompArt::Digit6;case '7':return ChompArt::Digit7;case '8':return ChompArt::Digit8;
+ case '9':return ChompArt::Digit9;case '.':return ChompArt::SymDot;default:return ChompArt::SymS;
+ }
+}
+int timeWidth(const char* str){int total=0;for(const char* t=str;*t;++t)total+=timerSprite(*t).w+1;return total?total-1:0;}
 void drawTimeLabel(int right,int y,const char* str){
-  // Original 5x9 segment digits: a 1-pixel taller clock than font size 1.
-  // Not scaling the entire font avoids blowing up the transport row.
-  static const uint8_t segments[10]={0x3f,0x06,0x5b,0x4f,0x66,0x6d,0x7d,0x07,0x7f,0x6f};
-  int width=0;
-  for(const char* t=str;*t;t++)width+=(*t>='0'&&*t<='9')?8:(*t=='.'?4:7);
-  int x=right-width;
-  for(const char* t=str;*t;t++){
-    const char ch=*t;
-    if(ch>='0'&&ch<='9'){
-      uint8_t seg=segments[ch-'0'];
-      if(seg&0x01)canvas.drawFastHLine(x+1,y,4,WHITE);
-      if(seg&0x02)canvas.drawFastVLine(x+5,y+1,3,WHITE);
-      if(seg&0x04)canvas.drawFastVLine(x+5,y+5,3,WHITE);
-      if(seg&0x08)canvas.drawFastHLine(x+1,y+8,4,WHITE);
-      if(seg&0x10)canvas.drawFastVLine(x,y+5,3,WHITE);
-      if(seg&0x20)canvas.drawFastVLine(x,y+1,3,WHITE);
-      if(seg&0x40)canvas.drawFastHLine(x+1,y+4,4,WHITE);
-      x+=8;
-    }else if(ch=='.'){canvas.fillRect(x,y+7,2,2,WHITE);x+=4;}
-    else{canvas.setTextSize(1);canvas.setTextColor(WHITE);canvas.setCursor(x,y+1);canvas.print(ch);x+=7;}
-  }
+ int x=right-timeWidth(str);
+ for(const char* t=str;*t;++t){
+  const auto& glyph=timerSprite(*t);
+  drawAtlasSprite(glyph,x,y+(12-int(glyph.h))/2,state==State::Playing?palette().active:palette().warning);
+  x+=glyph.w+1;
+ }
 }
 void drawWaveform(int left,int top,int width,int height){
   const int cy=top+height/2;
@@ -411,7 +424,7 @@ void drawWaveform(int left,int top,int width,int height){
   }
   if(state==State::Playing){
     int marker=int(playbackProgress*totalPixels-startPixel);
-    if(marker>=0&&marker<width)canvas.drawFastVLine(left+marker,top,height,YELLOW);
+    if(marker>=0&&marker<width)canvas.drawFastVLine(left+marker,top,height,palette().warning);
   }
 }
 // A compact two-tier, six-button transport strip; all geometry fits 240x135.
@@ -420,35 +433,39 @@ void drawTransportButtons(int w,int h){
   const int columns=portrait?3:6;
   const int x0=4,gap=portrait?2:1;
   // Landscape: six buttons use all available width, timer occupies far right.
-  const int timerWidth=38,timerGap=2;
+  const int timerWidth=32,timerGap=1;
   const int area=portrait?w-2*x0:w-2*x0-timerWidth-timerGap;
   const int bw=(area-(columns-1)*gap)/columns;
-  const int bh=portrait?26:27;
+  const int bh=portrait?27:27;
   const int y0=portrait?h-65:h-30;
   for(int i=0;i<6;i++){
     const int col=i%columns,row=i/columns;
     const int x=x0+col*(bw+gap),y=y0+row*(bh+gap);
     const bool selected=int(playerFocus)==i;
-    const uint16_t border=selected?(playerEditing?YELLOW:LIME):TRIM;
-    const uint16_t c=selected?LIME:WHITE;
+    const uint16_t border=selected?(playerEditing?palette().active:themeAccent()):TRIM;
+    const uint16_t c=selected?themeAccent():WHITE;
     // Do not flood-fill the button; native RGB565 artwork shows through.
+    // Editable atlas frame underneath the live focus border and glyphs.
+    const auto& frame=portrait?ChompArt::BtnPStd:(i==0?ChompArt::BtnLPlay:i==1?ChompArt::BtnLSpeed:
+      i==2?ChompArt::BtnLFx1:i==3?ChompArt::BtnLFx2:i==4?ChompArt::BtnLFx3:ChompArt::BtnLLoop);
+    // Source frames remain pixel-perfect (no scaling); frame origin follows slot.
+    if(frame.w<=bw && frame.h<=bh)drawAtlasSprite(frame,x,y,themeAccent());
     canvas.drawRect(x,y,bw,bh,border);
     canvas.drawFastHLine(x+1,y+1,bw-2,selected?WHITE:MUTED);
-    canvas.fillRect(x+bw-5,y+4,3,3,selected?(playerEditing?YELLOW:GREEN):0x10A2);
+    canvas.fillRect(x+bw-5,y+4,3,3,selected?(playerEditing?palette().active:themeAccent()):0x10A2);
     const int cx=x+bw/2;
     if(i==0){
-      if(state==State::Playing)drawAtlasSprite(ChompArt::IconPause,cx-6,y+5,c);
-      else drawAtlasSprite(ChompArt::IconPlay,cx-7,y+5,c);
+      if(state==State::Playing)drawAtlasSprite(ChompArt::IconPause,cx-6,y+6,c);
+      else drawAtlasSprite(ChompArt::IconPlay,cx-7,y+6,c);
     }else if(i==1){
       drawAtlasSprite(ChompArt::IconSpeed,cx-8,y+5,c);
       char sp[12];snprintf(sp,sizeof(sp),"%+.1fx",double(speed()));
       canvas.setTextColor(c);canvas.setTextSize(1);
       canvas.setCursor(cx-int(strlen(sp))*3,y+17);canvas.print(sp);
     }else if(i>=2&&i<=4){
-      canvas.setTextColor(i==2?c:MUTED);canvas.setTextSize(1);
-      const char* labs[]={"FX1","FX2","FX3"};
-      canvas.setCursor(cx-9,y+10);canvas.print(labs[i-2]);
-      if(i==2&&echoEnabled)canvas.fillRect(x+3,y+3,3,3,LIME);
+      const ChompArt::Sprite& fx=i==2?ChompArt::IconFx1Echo:i==3?ChompArt::IconFx2Stutter:ChompArt::IconFx3Robot;
+      drawAtlasSprite(fx,cx-fx.w/2,y+7,i==2?c:MUTED);
+      if(i==2&&echoEnabled)canvas.fillRect(x+3,y+3,3,3,palette().active);
     }else{
       const ChompArt::Sprite& li=loopMode==LoopMode::Off?ChompArt::IconLoopOff:(loopMode==LoopMode::One?ChompArt::IconLoopOne:ChompArt::IconLoopAll);
       drawAtlasSprite(li,cx-8,y+4,c);
@@ -460,14 +477,32 @@ void drawTransportButtons(int w,int h){
   char t[16];snprintf(t,sizeof(t),"%.1fs",double(state==State::Playing?playbackSeconds:captured/double(kSampleRate)));
   if(!portrait){
     const int tx=w-x0-timerWidth;
-    canvas.drawRect(tx,y0,timerWidth,bh,TRIM);
     // Restore custom seven-segment clock with centered text and 1px spacing.
-    int tw=0;for(const char* q=t;*q;q++)tw+=(*q>='0'&&*q<='9')?8:(*q=='.'?4:7);
-    drawTimeLabel(tx+(timerWidth+tw)/2,y0+(bh-9)/2,t);
+    const int tw=timeWidth(t);
+    drawTimeLabel(tx+(timerWidth+tw)/2,y0+(bh-12)/2,t);
   }else{
-    canvas.setTextSize(1);canvas.setTextColor(LIME);
+    canvas.setTextSize(1);canvas.setTextColor(themeAccent());
     canvas.setCursor(w-int(strlen(t))*6-7,y0-13);canvas.print(t);
   }
+}
+
+
+// Single non-wrapping transport/status strip. The speed number remains in the
+// lower control button; only direction and enabled indicators appear here.
+void drawCompactStatus(int areaLeft,int areaWidth,int y,bool center){
+  char text[50];
+  int used=snprintf(text,sizeof(text),"TRK:%d",activeTrack+1);
+  if(echoEnabled && used>=0 && used<int(sizeof(text)))used+=snprintf(text+used,sizeof(text)-used," E1");
+  // FX2/FX3 are reserved and intentionally do not claim to be active.
+  if(loopMode!=LoopMode::Off && used>=0 && used<int(sizeof(text)))
+    snprintf(text+used,sizeof(text)-used," %s",loopMode==LoopMode::One?"L1":"ALL");
+  canvas.setTextSize(1);
+  const int fullWidth=19+5+int(strlen(text))*6;
+  int x=center?areaLeft+(areaWidth-fullWidth)/2:areaLeft;
+  x=max(areaLeft,x);
+  drawDirectionIcon(x,y+1,speed()<0);
+  canvas.setTextColor(WHITE);
+  canvas.setCursor(x+24,y);canvas.print(text);
 }
 
 void drawChomp(){
@@ -477,16 +512,19 @@ void drawChomp(){
     // Independent vertical composition; leave enough space for 2x3 controls.
     if(state==State::Recording){
       canvas.fillRect(5,23,w-10,36,RED);
-      canvas.setTextColor(TFT_BLACK,RED);canvas.setTextSize(2);
-      canvas.setCursor(8,29);canvas.print("REC");
+      const int dotR=4;
+      const int recWidth=3*12;
+      const int combined=dotR*2+6+recWidth;
+      const int x=(w-combined)/2;
+      if((millis()/250)%2==0)canvas.fillCircle(x+dotR,37,dotR,TFT_BLACK);
+      canvas.setTextColor(TFT_BLACK);canvas.setTextSize(2);
+      canvas.setCursor(x+dotR*2+6,29);canvas.print("REC");
     }else{
       const char* heading=state==State::Playing?"PLAYING":state==State::Error?"ERROR":"READY";
       canvas.setTextSize(2);canvas.setTextColor(accent());
       const int titleX=(w-canvas.textWidth(heading))/2;
-      canvas.setCursor(titleX,27);canvas.print(heading);
-      char details[40];snprintf(details,sizeof(details),"%+.1fx TRK:%d",double(speed()),activeTrack+1);
-      canvas.setTextSize(1);canvas.setTextColor(WHITE);
-      canvas.setCursor((w-canvas.textWidth(details))/2,50);canvas.print(details);
+      canvas.setCursor(titleX,28);canvas.print(heading);
+      drawCompactStatus(4,w-8,51,true);
     }
     // Reels lowered for vertical arrangement, using existing art function.
     drawTapeReels(w);
@@ -503,19 +541,16 @@ void drawChomp(){
       canvas.setCursor(29,29);canvas.print("RECORDING");
     }else{
       const char* heading=state==State::Playing?"PLAYING":state==State::Error?"ERROR":"READY";
-      canvas.setTextSize(2);canvas.setTextColor(accent());canvas.setCursor(8,24);canvas.print(heading);
-      canvas.setTextSize(1);canvas.setTextColor(WHITE);canvas.setCursor(9,49);
+      canvas.setTextSize(2);canvas.setTextColor(accent());canvas.setCursor(8,25);canvas.print(heading);
       if(playerEditing){
+        canvas.setTextSize(1);canvas.setTextColor(WHITE);canvas.setCursor(9,49);
         switch(playerFocus){
           case PlayerFocus::Speed:canvas.printf("SPD %+.1fx",double(speed()));break;
           case PlayerFocus::EchoToggle:canvas.printf("FX1 %s %ums",echoEnabled?"ON":"OFF",unsigned(echoDelayMs));break;
           case PlayerFocus::Loop:canvas.printf("LOOP %s",loopMode==LoopMode::Off?"OFF":loopMode==LoopMode::One?"1":"ALL");break;
-          default:canvas.printf("%+.1fx TRK:%d",double(speed()),activeTrack+1);break;
+          default:drawCompactStatus(9,132,49,false);break;
         }
-      }else{
-        canvas.printf("%+.1fx TRK:%d",double(speed()),activeTrack+1);
-        if(state==State::Playing && echoEnabled){canvas.setCursor(9,59);canvas.printf("ECHO:%ums",unsigned(echoDelayMs));}
-      }
+      }else drawCompactStatus(9,132,49,false);
     }
     drawTapeReels(w);
     const int left=8,top=65,vw=w-16,vh=max(12,h-103);
@@ -550,11 +585,11 @@ void drawHome(){
     int x=margin+(i/perColumn)*(cw+gap);
     int y=24+(i%perColumn)*(h>w?28:24);
     bool selected=i==homeSelection;
-    uint16_t surface=selected?0x32A5:PANEL;
+    uint16_t surface=PANEL;
     canvas.fillRect(x,y,cw,21,surface);
-    canvas.drawRect(x,y,cw,21,selected?LIME:TRIM);
-    drawMenuIcon(x+6,y+6,i,selected?LIME:WHITE);
-    canvas.setTextSize(1);canvas.setTextColor(selected?LIME:WHITE,surface);
+    canvas.drawRect(x,y,cw,21,selected?themeAccent():TRIM);
+    drawMenuIcon(x+6,y+6,i,selected?themeAccent():WHITE);
+    canvas.setTextSize(1);canvas.setTextColor(selected?themeAccent():WHITE,surface);
     canvas.setCursor(x+20,y+7);canvas.print(items[i]);
   }
 }
@@ -562,10 +597,10 @@ void drawTracks(){
   int w=canvas.width(),h=canvas.height();
   for(int i=0;i<kTrackCount;i++){
     int y=23+i*22;
-    uint16_t surface=i==trackSelection?0x32A5:PANEL;
+    uint16_t surface=PANEL;
     canvas.fillRect(7,y,w-14,20,surface);
-    canvas.drawRect(7,y,w-14,20,i==trackSelection?LIME:TRIM);
-    canvas.setTextSize(1);canvas.setTextColor(i==trackSelection?LIME:WHITE,surface);
+    canvas.drawRect(7,y,w-14,20,i==trackSelection?themeAccent():TRIM);
+    canvas.setTextSize(1);canvas.setTextColor(i==trackSelection?themeAccent():WHITE,surface);
     canvas.setCursor(13,y+6);canvas.printf("%c CHOMP %02d",i==activeTrack?'*':' ',i+1);
     canvas.setCursor(w-88,y+6);
     if(tracks[i].length)canvas.printf("%.1fs",double(tracks[i].length)/kSampleRate);
@@ -582,10 +617,10 @@ void drawSettings(){
   const char* shortLabels[]={"VOL","BRGT","REV","AUTO","RESET","ORIENT","THEME"};
   for(int i=0;i<7;i++){
     int y=19+i*14;bool sel=settingsSelection==i;
-    uint16_t surface=sel?0x32A5:PANEL;
+    uint16_t surface=PANEL;
     canvas.fillRect(7,y,w-14,14,surface);
-    canvas.drawRect(7,y,w-14,14,sel?(settingsEditing?YELLOW:LIME):TRIM);
-    canvas.setTextColor(sel?LIME:WHITE,surface);canvas.setTextSize(1);
+    canvas.drawRect(7,y,w-14,14,sel?(settingsEditing?palette().active:themeAccent()):TRIM);
+    canvas.setTextColor(sel?themeAccent():WHITE,surface);canvas.setTextSize(1);
     canvas.setCursor(13,y+3);canvas.print(h>w?shortLabels[i]:labels[i]);
     canvas.setCursor(w-(h>w?52:75),y+3);
     if(i==0)canvas.printf("%u%%",unsigned(volumePct));
@@ -594,14 +629,14 @@ void drawSettings(){
     else if(i==3)canvas.print(autoPlay?"ON":"OFF");
     else if(i==4)canvas.print(resetSpeedAfterRecord?"ON":"OFF");
     else if(i==5)canvas.print(orientationMode==OrientationMode::Landscape?"LAND":orientationMode==OrientationMode::Portrait?"VERT":"AUTO");
-    else canvas.print(themeSelection==0?"GREEN":themeSelection==1?"CYAN":themeSelection==2?"AMBER":"PINK");
+    else canvas.print(palette().name);
   }
   canvas.setTextColor(WHITE,BG);canvas.setCursor(7,h-14);
   canvas.print(settingsEditing?"TURN:CHANGE CLICK:DONE":"TURN:SELECT CLICK:EDIT");
 }
 
 void drawInfoPage(bool about){
-  canvas.setTextSize(1);canvas.setTextColor(LIME,BG);
+  canvas.setTextSize(1);canvas.setTextColor(themeAccent(),BG);
   if(about){
     canvas.setCursor(8,29);canvas.print("SOUND-CHOMP ");canvas.print(kFirmwareVersion);
     canvas.setTextColor(WHITE,BG);canvas.setCursor(8,47);canvas.print("BUILT BY u/eyeofbri");
@@ -613,7 +648,7 @@ void drawInfoPage(bool about){
     const char* descriptions[]={"PLAY / STOP","RECORD","STOP RECORDING","NAV / ADJUST","EDIT / PLAY","FOCUS PLAY","MENU"};
     for(int i=0;i<7;i++){
       int y=24+i*14;
-      canvas.setTextColor(LIME,BG);canvas.setCursor(8,y);canvas.print(keys[i]);
+      canvas.setTextColor(themeAccent(),BG);canvas.setCursor(8,y);canvas.print(keys[i]);
       canvas.setTextColor(WHITE,BG);canvas.setCursor(88,y);canvas.print(descriptions[i]);
     }
   }
@@ -622,11 +657,11 @@ void drawInfoPage(bool about){
 void drawCharge(){
   const int w=canvas.width();
   const int bx=44,by=35,bw=w-88,bh=56;
-  canvas.drawRoundRect(bx,by,bw,bh,6,WHITE);
-  canvas.fillRect(bx-8,by+17,8,22,WHITE); // same left-side terminal
+  canvas.drawRoundRect(bx,by,bw,bh,6,themeAccent());
+  canvas.fillRect(bx-8,by+17,8,22,themeAccent()); // same left-side terminal
   const int fill=(bw-10)*batteryPct/100;
-  canvas.fillRoundRect(bx+5,by+5,fill,bh-10,3,batteryPct<20?RED:GREEN);
-  canvas.setTextSize(2);canvas.setTextColor(WHITE,BG);
+  canvas.fillRoundRect(bx+5,by+5,fill,bh-10,3,batteryPct<20?palette().warning:themeAccent());
+  canvas.setTextSize(2);canvas.setTextColor(themeAccent(),BG);
   char buf[12];snprintf(buf,sizeof buf,"%u%%",unsigned(batteryPct));
   canvas.setCursor((w-int(strlen(buf))*12)/2,101);canvas.print(buf);
   if(charging){canvas.setTextSize(1);canvas.setCursor(92,23);canvas.print("CHARGING");}
@@ -634,16 +669,16 @@ void drawCharge(){
 void drawEffects(){
   const int w=canvas.width();
   const int y=28;
-  canvas.setTextSize(1);canvas.setTextColor(LIME,BG);canvas.setCursor(8,21);canvas.print("EFFECTS / FX-1");
-  canvas.fillRect(5,y,w-10,25,PANEL);canvas.drawRect(5,y,w-10,25,LIME);
+  canvas.setTextSize(1);canvas.setTextColor(themeAccent(),BG);canvas.setCursor(8,21);canvas.print("EFFECTS / FX-1");
+  canvas.fillRect(5,y,w-10,25,PANEL);canvas.drawRect(5,y,w-10,25,themeAccent());
   canvas.setTextSize(1);canvas.setTextColor(WHITE,PANEL);canvas.setCursor(9,y+9);canvas.print("ECHO");
   const int widths[3]={28,34,45};
   int xs[3]={w-114,w-83,w-46};
   for(int i=0;i<3;i++){
     const bool active=effectsEditing&&effectsField==i;
     canvas.fillRect(xs[i],y+4,widths[i],17,active?0x39A6:0x2184);
-    canvas.drawRect(xs[i],y+4,widths[i],17,active?YELLOW:TRIM);
-    canvas.setTextColor(active?YELLOW:WHITE,active?0x39A6:0x2184);
+    canvas.drawRect(xs[i],y+4,widths[i],17,active?palette().active:TRIM);
+    canvas.setTextColor(active?palette().active:WHITE,active?0x39A6:0x2184);
     canvas.setCursor(xs[i]+3,y+9);
     if(i==0)canvas.print(echoEnabled?"ON":"OFF");
     else if(i==1)canvas.printf("%u%%",unsigned(echoWet));
@@ -661,8 +696,17 @@ void draw(bool force=false){
   if(!force&&millis()-lastFrame<kFrameMs)return;
   lastFrame=millis();updateBattery();
   // Static pre-rendered RGB565 art, followed by dynamic off-screen rendering.
-  if(canvas.width()>canvas.height())canvas.pushImage(0,0,240,135,ChompArt::kRetroLandscape);
-  else canvas.pushImage(0,0,135,240,ChompArt::kRetroPortrait);
+  if(page==Page::Chomp){
+    if(canvas.width()>canvas.height()){
+      const uint16_t* bg=themeSelection==1?ChompArt::kRetroLandscapeRed:
+                         themeSelection==2?ChompArt::kRetroLandscapeBlue:ChompArt::kRetroLandscapeGreen;
+      canvas.pushImage(0,0,240,135,bg);
+    }else{
+      const uint16_t* bg=themeSelection==1?ChompArt::kRetroPortraitRed:
+                         themeSelection==2?ChompArt::kRetroPortraitBlue:ChompArt::kRetroPortraitGreen;
+      canvas.pushImage(0,0,135,240,bg);
+    }
+  }else canvas.fillSprite(BG);
   drawHeader(page==Page::Home?"SOUND-CHOMP":page==Page::Chomp?"CHOMP / PLAYER":page==Page::Tracks?"TRACKS":page==Page::Effects?"EFFECTS":page==Page::HowTo?"HOW TO":page==Page::About?"ABOUT":page==Page::Charge?"CHARGE":"SETTINGS");
   if(page==Page::Home)drawHome();else if(page==Page::Chomp)drawChomp();
   else if(page==Page::Tracks)drawTracks();else if(page==Page::Settings)drawSettings();
@@ -708,7 +752,7 @@ void handleWheel(int delta){
       else if(settingsSelection==3 && delta!=0)autoPlay=delta>0;
       else if(settingsSelection==4 && delta!=0)resetSpeedAfterRecord=delta>0;
       else if(settingsSelection==5 && delta!=0)orientationMode=static_cast<OrientationMode>(constrain(int(orientationMode)+(delta>0?1:-1),0,2));
-      else if(settingsSelection==6 && delta!=0)themeSelection=uint8_t(constrain(int(themeSelection)+delta,0,3));
+      else if(settingsSelection==6 && delta!=0)themeSelection=uint8_t(constrain(int(themeSelection)+delta,0,2));
     }else settingsSelection=constrain(settingsSelection+delta,0,6);
   }
 }
@@ -911,11 +955,11 @@ void splash(){
     const int lowerY=int(h+35-travel*(h/2+25));
     canvas.fillSprite(BG);
     const int startX=w/2-44;
-    canvas.drawFastHLine(startX,upperY-10,88,LIME);
-    canvas.drawFastHLine(startX,lowerY+10,88,LIME);
+    canvas.drawFastHLine(startX,upperY-10,88,themeAccent());
+    canvas.drawFastHLine(startX,lowerY+10,88,themeAccent());
     for(int i=0;i<7;i++){
-      canvas.fillTriangle(startX+4+i*12,upperY-9,startX+13+i*12,upperY-9,startX+9+i*12,upperY+4,LIME);
-      canvas.fillTriangle(startX+4+i*12,lowerY+9,startX+13+i*12,lowerY+9,startX+9+i*12,lowerY-4,LIME);
+      canvas.fillTriangle(startX+4+i*12,upperY-9,startX+13+i*12,upperY-9,startX+9+i*12,upperY+4,themeAccent());
+      canvas.fillTriangle(startX+4+i*12,lowerY+9,startX+13+i*12,lowerY+9,startX+9+i*12,lowerY-4,themeAccent());
     }
     // Small wordmark; crumble its pixels outwards when the jaws meet.
     const uint32_t impactAt=365;
@@ -924,7 +968,7 @@ void splash(){
     const char* splashTitle="SOUND-CHOMP";
     const int tx=(w-int(strlen(splashTitle))*12)/2,ty=h/2-8;
     if(!afterImpact){
-      canvas.setTextSize(2);canvas.setTextColor(WHITE,BG);
+      canvas.setTextSize(2);canvas.setTextColor(themeAccent(),BG);
       canvas.setCursor(tx,ty);canvas.print(splashTitle);
     }else{
       const int spread=min(32,int((elapsed-impactAt)/11));
@@ -933,7 +977,7 @@ void splash(){
         int dx=((i*37)%23)-11,dy=((i*19)%11)-5;
         int x=w/2+dx*2+((i&1)?spread:-spread);
         int y=h/2+dy+((i&2)?spread/2:-spread/2);
-        if(x>=0&&x<w&&y>=0&&y<h)canvas.drawPixel(x,y,(i%4)?WHITE:LIME);
+        if(x>=0&&x<w&&y>=0&&y<h)canvas.drawPixel(x,y,(i%4)?WHITE:themeAccent());
       }
     }
     canvas.pushSprite(0,0);
@@ -952,7 +996,7 @@ void setup(){
   invertedReverse=prefs.getBool("revInvert",false);autoPlay=prefs.getBool("autoPlay",false);
   resetSpeedAfterRecord=prefs.getBool("resetSpd",true);
   orientationMode=static_cast<OrientationMode>(constrain(int(prefs.getUChar("orientation",0)),0,2));
-  themeSelection=uint8_t(constrain(int(prefs.getUChar("theme",0)),0,3));
+  themeSelection=uint8_t(constrain(int(prefs.getUChar("theme",0)),0,2));
   echoEnabled=prefs.getBool("echoOn",false);
   echoWet=uint8_t(constrain(int(prefs.getUChar("echoWet",35)),0,100));
   echoDelayMs=uint16_t(constrain(int(prefs.getUShort("echoDelay",250)),kEchoMinMs,kEchoMaxMs));

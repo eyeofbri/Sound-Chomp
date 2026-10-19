@@ -1,53 +1,97 @@
 #!/usr/bin/env python3
-"""Generate all RGB565 backgrounds and tintable UI sprites from canonical PNG.
-
-Run from any cwd: python tools/generate_ui_assets.py
-Source crop rectangles NEVER include magenta guide borders.
-Reserved opaque source colors: #FF00FF primary accent, #00FFFF secondary accent.
+"""Regenerate Sound-Chomp atlas header automatically during PlatformIO builds.
+Pure standard-library PNG reader, supports non-interlaced RGB/RGBA 8-bit PNG.
+Magenta guides fall outside mapped crop rectangles and never enter output.
 """
 from pathlib import Path
-from PIL import Image
-import json
+import json, struct, zlib
 ROOT=Path(__file__).resolve().parents[1]
 ATLAS=ROOT/'assets/ui/sound_chomp_spritesheet.png'
 MAP=ROOT/'assets/ui/sound_chomp_spritesheet.json'
 OUT=ROOT/'include/generated/ui_assets.h'
-info=json.loads(MAP.read_text())
-im=Image.open(ATLAS).convert('RGBA')
-assert im.size==(info['meta']['width'],info['meta']['height'])
-sprites=info['sprites']
-def normal565(r,g,b): return ((r>>3)<<11)|((g>>2)<<5)|(b>>3)
+
+def load_png(path):
+    data=path.read_bytes()
+    if data[:8]!=b'\x89PNG\r\n\x1a\n':raise ValueError('Invalid PNG signature')
+    at=8; idat=bytearray(); w=h=bpp=0
+    while at<len(data):
+        length=struct.unpack_from('>I',data,at)[0]
+        typ=data[at+4:at+8]; chunk=data[at+8:at+8+length];at+=length+12
+        if typ==b'IHDR':
+            w,h,depth,col,compression,filt,interlace=struct.unpack('>IIBBBBB',chunk)
+            if depth!=8 or col not in (2,6) or interlace or compression or filt:
+                raise ValueError('Atlas must be non-interlaced 8-bit RGB or RGBA PNG')
+            bpp=4 if col==6 else 3
+        elif typ==b'IDAT':idat.extend(chunk)
+        elif typ==b'IEND':break
+    raw=zlib.decompress(idat)
+    stride=w*bpp; prev=bytearray(stride);offset=0;rows=[]
+    for y in range(h):
+        kind=raw[offset];offset+=1
+        row=bytearray(raw[offset:offset+stride]);offset+=stride
+        for i in range(stride):
+            a=row[i-bpp] if i>=bpp else 0
+            b=prev[i];c=prev[i-bpp] if i>=bpp else 0
+            if kind==1:row[i]=(row[i]+a)&255
+            elif kind==2:row[i]=(row[i]+b)&255
+            elif kind==3:row[i]=(row[i]+((a+b)//2))&255
+            elif kind==4:
+                p=a+b-c; pa=abs(p-a);pb=abs(p-b);pc=abs(p-c)
+                predictor=a if pa<=pb and pa<=pc else b if pb<=pc else c
+                row[i]=(row[i]+predictor)&255
+            elif kind!=0:raise ValueError('Invalid PNG filter')
+        if bpp==4:rows.append([tuple(row[x:x+4]) for x in range(0,stride,4)])
+        else:rows.append([(*row[x:x+3],255) for x in range(0,stride,3)])
+        prev=row
+    return w,h,rows
+
+def rgb565(r,g,b):return ((r>>3)<<11)|((g>>2)<<5)|(b>>3)
 def swapped(v):return ((v&255)<<8)|(v>>8)
-def cident(name): return ''.join(part.capitalize() for part in name.split('_'))
-lines=['#pragma once','#include <Arduino.h>','// AUTO-GENERATED; edit assets/ui/sound_chomp_spritesheet.png, never this header.','namespace ChompArt {',
-'// Pixel encoding: 0=transparent, 0x10000=primary, 0x20000=secondary,',
-'// 0x30000 | RGB565=opaque fixed color (including black).',
-'struct Sprite { uint16_t w,h; const uint32_t* pixels; };']
-for name,s in sprites.items():
-    x,y,w,h=(s[k] for k in ('x','y','w','h'))
-    assert x>=1 and y>=1 and x+w<im.width and y+h<im.height,(name,s)
-    crop=im.crop((x,y,x+w,y+h))
-    pix=list(crop.getdata())
+def cident(name):return ''.join(part.capitalize() for part in name.split('_'))
+
+info=json.loads(MAP.read_text())
+w,h,rows=load_png(ATLAS)
+assert (w,h)==(info['meta']['width'],info['meta']['height'])
+lines=['#pragma once','#include <Arduino.h>',
+       '// AUTO GENERATED: edit PNG + JSON, not this file.',
+       'namespace ChompArt {',
+       '// 0=transparent, 0x10000=theme.primary, 0x20000=theme.secondary, 0x30000|RGB565=fixed',
+       'struct Sprite { uint16_t w,h; const uint32_t* pixels; };']
+for name,s in info['sprites'].items():
+    x,y,sw,sh=(s[k] for k in ('x','y','w','h'))
+    assert x>=1 and y>=1 and x+sw<w and y+sh<h,(name,s)
+    pix=[pixel for row in rows[y:y+sh] for pixel in row[x:x+sw]]
     if name.startswith('bg_'):
-        # ESP32 M5Canvas pushImage() consumes byte-swapped RGB565 with this config.
-        v=[swapped(normal565(r,g,b)) for r,g,b,a in pix]
-        identifier='kRetroLandscape' if name=='bg_landscape' else 'kRetroPortrait'
-        lines.append(f'const uint16_t {identifier}[{w*h}] PROGMEM = {{')
-        for i in range(0,len(v),16):lines.append('  '+','.join(f'0x{n:04X}' for n in v[i:i+16])+',')
-        lines.append('};')
+        # Keep one canonical source image. Generate palette-shifted player-only
+        # backgrounds at build time (metallic/gray components are preserved).
+        for suffix,primary in [('Green',(0,255,0)),('Red',(255,0,0)),('Blue',(0,255,247))]:
+            values=[]
+            for r,g,b,a in pix:
+                if suffix!='Green' and g>max(r,b)*1.18 and g>18:
+                    # The source green channel controls intensity; maintain
+                    # dark graduated shading in the resulting accent color.
+                    intensity=g/255.0
+                    r,g,b=(min(255,int(primary[0]*intensity)),
+                           min(255,int(primary[1]*intensity)),
+                           min(255,int(primary[2]*intensity)))
+                values.append(swapped(rgb565(r,g,b)))
+            prefix='kRetroLandscape' if name=='bg_landscape' else 'kRetroPortrait'
+            ident=prefix+suffix
+            lines.append(f'const uint16_t {ident}[{sw*sh}] PROGMEM = {{')
+            for i in range(0,len(values),20):lines.append(' '+','.join(f'0x{v:04X}' for v in values[i:i+20])+',')
+            lines.append('};')
     else:
         values=[]
         for r,g,b,a in pix:
-            if a<128: value=0
-            elif (r,g,b)==(255,0,255):value=0x10000
-            elif (r,g,b)==(0,255,255):value=0x20000
-            else:value=0x30000|normal565(r,g,b)
+            value=0 if a<128 else 0x10000 if (r,g,b)==(255,0,255) else 0x20000 if (r,g,b)==(0,255,255) else 0x30000|rgb565(r,g,b)
             values.append(value)
         ident=cident(name)
-        lines.append(f'const uint32_t data{ident}[{w*h}] PROGMEM = {{')
-        for i in range(0,len(values),14):lines.append('  '+','.join(f'0x{n:05X}' for n in values[i:i+14])+',')
+        lines.append(f'const uint32_t data{ident}[{sw*sh}] PROGMEM = {{')
+        for i in range(0,len(values),18):lines.append(' '+','.join(f'0x{v:05X}' for v in values[i:i+18])+',')
         lines.append('};')
-        lines.append(f'const Sprite {ident} = {{{w},{h},data{ident}}};')
+        lines.append(f'const Sprite {ident} = {{{sw},{sh},data{ident}}};')
 lines.append('} // namespace ChompArt')
-OUT.parent.mkdir(parents=True,exist_ok=True);OUT.write_text('\n'.join(lines)+'\n')
-print(f'Generated {OUT} from {len(sprites)} sprites')
+OUT.parent.mkdir(parents=True,exist_ok=True)
+output='\n'.join(lines)+'\n'
+if not OUT.exists() or OUT.read_text()!=output:OUT.write_text(output)
+print(f'Generated {OUT.name} from {len(info["sprites"])} atlas regions')
