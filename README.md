@@ -74,3 +74,9 @@ See `docs/phase4b-tracks.md` for full controls, technical notes, and verificatio
 Phase 4D adds last-selected-track persistence, three loop modes (OFF / 1 / ALL),
 and tape-transfer reel animation. See [Phase 4D test notes](docs/phase4d-tape-transfer.md).
 This is an unverified development package; use the last tested Phase 4C build for rollback.
+
+## Current development package — Phase 5A (experimental)
+
+Based on the hardware-verified Phase 4D persistent-track build, Phase 5A adds a **non-destructive echo effect** with adjustable mix and delay. Use **B → Effects** to enable echo and change its settings. In Chomp, **short scroll click switches between Speed and Echo mix**, scroll rotation adjusts the highlighted mode, **long scroll click cycles loop modes**, **tap A plays/stops**, and **hold A records**. Loop All displays `ALL(n)` for the current slot.
+
+Four stored recordings and track selection survive device restarts. Echo preferences are stored in NVS, not written into PCM files. This source package has not yet been built or hardware-tested: see [Phase 5A guide](docs/phase5a-echo.md) for the definitive current controls and tests. Earlier historical sections above describe older behavior and should not be used as current instructions.

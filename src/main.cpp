@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 4D: persistent active track, loop modes and tape-transfer reels.
+// Sound-Chomp Phase 5A: live non-destructive echo and wheel control modes.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -21,6 +21,33 @@ constexpr int kStepsPerDirection=26; // 0.50x through 3.00x in 0.10x steps
 constexpr int kSpeedCount=2*kStepsPerDirection;
 int speedIndex=kStepsPerDirection+5; // +1.0x
 bool invertedReverse=false,autoPlay=false,resetSpeedAfterRecord=true;
+// Echo is mixed only into speaker output; stored LittleFS clips are unchanged.
+constexpr int kEchoMinMs=100,kEchoMaxMs=600,kEchoStepMs=50;
+constexpr size_t kEchoBufferSamples=(kSampleRate*kEchoMaxMs)/1000;
+int16_t* echoHistory=nullptr;
+size_t echoHead=0;
+uint8_t echoWet=35;
+uint16_t echoDelayMs=250;
+bool echoEnabled=false;
+enum class WheelMode:uint8_t{Speed,Echo};
+WheelMode wheelMode=WheelMode::Speed;
+int effectsSelection=0;
+bool effectsEditing=false;
+int16_t applyEcho(int16_t dry){
+  if(!echoHistory)return dry;
+  const size_t delaySamples=size_t(echoDelayMs)*kSampleRate/1000;
+  const size_t readIndex=(echoHead+kEchoBufferSamples-delaySamples)%kEchoBufferSamples;
+  // Delay-line feedback is deliberately low to avoid runaway echoes.
+  const int32_t delayed=echoHistory[readIndex];
+  const int32_t wet=echoEnabled?int32_t(echoWet):0;
+  const int32_t mixed=int32_t(dry)+(delayed*wet)/100;
+  const int32_t feedback=int32_t(dry)+(delayed*35)/100;
+  echoHistory[echoHead]=int16_t(constrain(feedback,-32768,32767));
+  echoHead=(echoHead+1)%kEchoBufferSamples;
+  return int16_t(constrain(mixed,-32768,32767));
+}
+void resetEchoHistory(){if(echoHistory)memset(echoHistory,0,kEchoBufferSamples*sizeof(int16_t));echoHead=0;}
+
 float speed(){
   if(speedIndex>=kStepsPerDirection)return 0.5f+0.1f*float(speedIndex-kStepsPerDirection);
   const int magnitudeStep=invertedReverse?(speedIndex):(kStepsPerDirection-1-speedIndex);
@@ -299,7 +326,9 @@ void drawLoopIcon(int x,int y){
   // ON: 1 or A (all). OFF: unlit indicator. Keep transport-row footprint.
   if(enabled){
     canvas.setTextSize(1);canvas.setTextColor(LIME,BG);
-    canvas.setCursor(x+24,y+1);canvas.print(loopMode==LoopMode::One?"1":"A");
+    canvas.setCursor(x+24,y+1);
+    if(loopMode==LoopMode::One)canvas.print("1");
+    else canvas.printf("ALL(%d)",activeTrack+1);
   }
 }
 void drawTimeLabel(int right,int y,const char* str){
@@ -370,7 +399,11 @@ void drawChomp(){
     canvas.setTextSize(2);canvas.setTextColor(accent(),BG);
     canvas.setCursor(8,22);canvas.print(status);
     canvas.setTextSize(2);canvas.setTextColor(accent(),BG);
-    canvas.setCursor(8,43);canvas.printf("%+.1fx",double(speed()));
+    canvas.setCursor(8,43);
+    if(wheelMode==WheelMode::Speed)canvas.printf("%+.1fx",double(speed()));
+    else {canvas.setTextSize(1);canvas.setTextColor(YELLOW,BG);canvas.printf("ECHO %u%% %s",unsigned(echoWet),echoEnabled?"ON":"OFF");}
+    // Colored pixel indicates which parameter the Unit Scroll adjusts.
+    canvas.fillRect(4,55,3,3,wheelMode==WheelMode::Echo?YELLOW:accent());
   }
   drawTapeReels(w);
   const int left=8,top=65,vw=w-16,vh=max(12,h-90);
@@ -469,7 +502,7 @@ void drawInfoPage(bool about){
     canvas.setCursor(8,92);canvas.print("Sound-Chomp");
   }else{
     const char* keys[]={"TAP A:","HOLD A:","RELEASE:","WHEEL:","CLICK:","HOLD CLICK:","B:"};
-    const char* descriptions[]={"PLAY / STOP","RECORD","STOP RECORDING","SPEED / REVERSE","PLAY / STOP","LOOP OFF / 1 / ALL","MENU"};
+    const char* descriptions[]={"PLAY / STOP","RECORD","STOP RECORDING","SPEED / ECHO","SWITCH MODE","LOOP OFF / 1 / ALL","MENU"};
     for(int i=0;i<7;i++){
       int y=24+i*14;
       canvas.setTextColor(LIME,BG);canvas.setCursor(8,y);canvas.print(keys[i]);
@@ -491,9 +524,22 @@ void drawCharge(){
   if(charging){canvas.setTextSize(1);canvas.setCursor(92,23);canvas.print("CHARGING");}
 }
 void drawEffects(){
-  canvas.setTextSize(2);canvas.setTextColor(LIME,BG);canvas.setCursor(8,35);canvas.print("EFFECTS");
-  canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(8,67);
-  canvas.print("Echo and more coming soon");
+  canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);
+  canvas.setCursor(9,23);canvas.print("NON-DESTRUCTIVE ECHO");
+  const char* labels[]={"ECHO ENABLE","ECHO MIX","ECHO DELAY"};
+  for(int i=0;i<3;i++){
+    const int y=37+i*24;
+    uint16_t bg=i==effectsSelection?0x32A5:PANEL;
+    canvas.fillRect(7,y,canvas.width()-14,21,bg);
+    canvas.drawRect(7,y,canvas.width()-14,21,i==effectsSelection?(effectsEditing?YELLOW:LIME):TRIM);
+    canvas.setTextSize(1);canvas.setTextColor(WHITE,bg);canvas.setCursor(13,y+7);canvas.print(labels[i]);
+    canvas.setCursor(canvas.width()-79,y+7);
+    if(i==0)canvas.print(echoEnabled?"ON":"OFF");
+    else if(i==1)canvas.printf("%u%%",unsigned(echoWet));
+    else canvas.printf("%ums",unsigned(echoDelayMs));
+  }
+  canvas.setTextColor(MUTED,BG);canvas.setCursor(7,canvas.height()-13);
+  canvas.print(effectsEditing?"TURN: ADJUST CLICK: DONE":"TURN: SELECT CLICK: EDIT");
 }
 void draw(bool force=false){
   if(!canvasReady)return;
@@ -501,7 +547,7 @@ void draw(bool force=false){
   if(!force&&millis()-lastFrame<kFrameMs)return;
   lastFrame=millis();updateBattery();
   canvas.fillSprite(BG);canvas.drawRect(0,0,canvas.width(),canvas.height(),TRIM);
-  drawHeader(page==Page::Home?"SOUND-CHOMP":page==Page::Chomp?"CHOMP / PLAYER":page==Page::Tracks?"TRACKS":"SETTINGS");
+  drawHeader(page==Page::Home?"SOUND-CHOMP":page==Page::Chomp?"CHOMP / PLAYER":page==Page::Tracks?"TRACKS":page==Page::Effects?"EFFECTS":page==Page::HowTo?"HOW TO":page==Page::About?"ABOUT":page==Page::Charge?"CHARGE":"SETTINGS");
   if(page==Page::Home)drawHome();else if(page==Page::Chomp)drawChomp();
   else if(page==Page::Tracks)drawTracks();else if(page==Page::Settings)drawSettings();
   else if(page==Page::Effects)drawEffects();else if(page==Page::Charge)drawCharge();else drawInfoPage(page==Page::About);
@@ -511,6 +557,11 @@ void handleWheel(int delta){
   if(page==Page::Home)homeSelection=constrain(homeSelection+delta,0,6);
   else if(page==Page::Tracks){trackSelection=constrain(trackSelection+delta,0,kTrackCount-1);trackDeleteConfirm=false;}
   else if(page==Page::Chomp){
+    if(wheelMode==WheelMode::Echo){
+      echoWet=uint8_t(constrain(int(echoWet)+delta*5,0,100));
+      Serial.printf("Echo wet: %u%%\n",unsigned(echoWet));
+      return;
+    }
     const int before=speedIndex;
     speedIndex=constrain(speedIndex+delta,0,kSpeedCount-1);
     if(state==State::Idle){
@@ -525,6 +576,12 @@ void handleWheel(int delta){
       }
     }
     Serial.printf("Rate: %+.2fx (live)\n",speed());
+  }else if(page==Page::Effects){
+    if(effectsEditing){
+      if(effectsSelection==0&&delta)echoEnabled=delta>0;
+      else if(effectsSelection==1)echoWet=uint8_t(constrain(int(echoWet)+delta*5,0,100));
+      else if(effectsSelection==2)echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*kEchoStepMs,kEchoMinMs,kEchoMaxMs));
+    }else effectsSelection=constrain(effectsSelection+delta,0,2);
   }else if(page==Page::Settings){
     if(settingsEditing){
       if(settingsSelection==0){volumePct=uint8_t(constrain(int(volumePct)+delta*5,0,100));setVolume();}
@@ -561,7 +618,8 @@ void updateScroll(){
 void service(){M5.update();updateScroll();}
 void clearEvents(){scrollShort=false;scrollLong=false;}
 void saveSettings(){prefs.putUChar("volume",volumePct);prefs.putUChar("bright",brightnessPct);prefs.putBool("revInvert",invertedReverse);prefs.putBool("autoPlay",autoPlay);prefs.putBool("resetSpd",resetSpeedAfterRecord);}
-void backHome(){trackDeleteConfirm=false;aWasDown=false;aHoldStarted=false;if(page==Page::Settings)saveSettings();settingsEditing=false;page=Page::Home;clearEvents();draw(true);}
+void saveEchoSettings(){prefs.putBool("echoOn",echoEnabled);prefs.putUChar("echoWet",echoWet);prefs.putUShort("echoDelay",echoDelayMs);}
+void backHome(){trackDeleteConfirm=false;aWasDown=false;aHoldStarted=false;if(page==Page::Settings)saveSettings();if(page==Page::Effects)saveEchoSettings();settingsEditing=false;effectsEditing=false;page=Page::Home;clearEvents();draw(true);}
 void openSelection(){
   aWasDown=M5.BtnA.isPressed();aHoldStarted=true;
   page=homeSelection==0?Page::Chomp:homeSelection==1?Page::Tracks:
@@ -600,6 +658,7 @@ void playClip(){
   if(!captured||!samples)return;
   for(auto* b:playChunks)if(!b)return;
   M5.Mic.end();
+  resetEchoHistory();
   if(!M5.Speaker.begin()){state=State::Error;errorText="SPEAKER BEGIN FAILED";return;}
   setVolume();state=State::Playing;setStateLed();clearEvents();draw(true);
   double cursor=speed()<0?double(captured-1):0.0;
@@ -618,7 +677,7 @@ void playClip(){
     if(buttonDown&&!playADown)playAPressed=millis();
     if(!buttonDown&&playADown&&millis()-playAPressed<kRecordHoldMs){interrupted=true;break;}
     playADown=buttonDown;
-    if(scrollShort){scrollShort=false;interrupted=true;break;}
+    if(scrollShort){scrollShort=false;wheelMode=wheelMode==WheelMode::Speed?WheelMode::Echo:WheelMode::Speed;draw(true);}
     if(scrollLong){scrollLong=false;cycleLoopMode();}
 
     // Only submit when the speaker has a free queue slot. The two-slot
@@ -654,7 +713,7 @@ void playClip(){
         const size_t right=min(left+1,captured-1);
         const float frac=float(cursor-double(left));
         const float v=samples[left]*(1.0f-frac)+samples[right]*frac;
-        output[count]=int16_t(v);
+        output[count]=applyEcho(int16_t(constrain(int32_t(v),-32768,32767)));
         cursor+=double(rate);
         ++samplesSinceBoundary;
       }
@@ -738,6 +797,9 @@ void setup(){
   brightnessPct=uint8_t(constrain(int(prefs.getUChar("bright",80)),5,100));
   invertedReverse=prefs.getBool("revInvert",false);autoPlay=prefs.getBool("autoPlay",false);
   resetSpeedAfterRecord=prefs.getBool("resetSpd",true);
+  echoEnabled=prefs.getBool("echoOn",false);
+  echoWet=uint8_t(constrain(int(prefs.getUChar("echoWet",35)),0,100));
+  echoDelayMs=uint16_t(constrain(int(prefs.getUShort("echoDelay",250)),kEchoMinMs,kEchoMaxMs));
   M5.Display.setBrightness(uint8_t(int(brightnessPct)*255/100));
   for(auto& t:tracks){
     t.pcm=static_cast<int16_t*>(heap_caps_malloc(kMaxSamples*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
@@ -753,13 +815,15 @@ void setup(){
   if(storageReady){loadTracks();captured=tracks[activeTrack].length;}
   else Serial.println("LittleFS mount failed: RAM-only operation; no persistent storage");
   for(auto& b:playChunks)b=static_cast<int16_t*>(heap_caps_malloc(kPlayChunk*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+  echoHistory=static_cast<int16_t*>(heap_caps_calloc(kEchoBufferSamples,sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+  if(!echoHistory){echoEnabled=false;Serial.println("Echo: no PSRAM, effect disabled");}
   bool audioBuffersReady=true;for(const auto& t:tracks)audioBuffersReady=audioBuffersReady&&(t.pcm!=nullptr);for(auto* b:playChunks)audioBuffersReady=audioBuffersReady&&(b!=nullptr);
   if(!audioBuffersReady){state=State::Error;errorText="PSRAM ALLOCATION FAILED";Serial.println(errorText);}
   canvas.setColorDepth(16);
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateWaveform();updateBattery();
-  Serial.println("Sound-Chomp Phase 4D - persistent selected track and tape reels");splash();draw(true);
+  Serial.println("Sound-Chomp Phase 5A - live echo prototype");splash();draw(true);
 }
 void loop(){
   service();
@@ -783,7 +847,7 @@ void loop(){
       playClip();
     }
     aWasDown=down;
-    if(state==State::Idle&&scrollShort){scrollShort=false;playClip();}
+    if(state==State::Idle&&scrollShort){scrollShort=false;wheelMode=wheelMode==WheelMode::Speed?WheelMode::Echo:WheelMode::Speed;draw(true);}
     if(scrollLong){cycleLoopMode();scrollLong=false;}
   }else if(page==Page::Tracks){
     if(trackDeleteConfirm){
@@ -807,7 +871,10 @@ void loop(){
     if(M5.BtnA.wasPressed()||scrollShort){scrollShort=false;chargeLastInteraction=millis();if(chargeScreenOff){chargeScreenOff=false;M5.Display.setBrightness(uint8_t(int(brightnessPct)*255/100));draw(true);}}
     if(!chargeScreenOff&&millis()-chargeLastInteraction>12000){chargeScreenOff=true;M5.Display.setBrightness(0);}
     scrollLong=false;
-  }else if(page==Page::HowTo||page==Page::About||page==Page::Effects){
+  }else if(page==Page::Effects){
+    if(M5.BtnA.wasPressed()||scrollShort){scrollShort=false;effectsEditing=!effectsEditing;if(!effectsEditing)saveEchoSettings();}
+    scrollLong=false;
+  }else if(page==Page::HowTo||page==Page::About){
     scrollShort=false;scrollLong=false;
   }
   draw();delay(5);

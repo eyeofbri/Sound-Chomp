@@ -92,3 +92,13 @@ This is a source prototype, not yet compiled or hardware validated.
 - Center and enlarge the splash title while retaining the two-jaw pixel crumble.
 - Render tape transfer with variable colored reel rings and correct rotation directions.
 - Preserve Phase 4C's LittleFS clip format and three-buffer playback.
+
+## Unreleased — Phase 5A live echo prototype
+
+- Introduce an Effects page: echo enable, mix 0–100%, and delay 100–600 ms.
+- Mix a non-destructive feedback echo into generated playback audio without modifying the LittleFS clips.
+- Reassign Chomp short scroll press to toggle Speed / Echo control, including during playback.
+- Keep A tap for Play/Stop, A hold for Record, and long scroll press for looping.
+- Show `ALL(n)` for Loop All, with the active track number; continue skipping empty slots.
+- Persist echo configuration in NVS; preserve Phase 4D's three-buffer speaker queue and saved track format.
+- See [Phase 5A test guide](docs/phase5a-echo.md). This package has not been compiled or tested on hardware.
