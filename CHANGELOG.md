@@ -1,3 +1,12 @@
+## Unreleased — Phase 5B.1 (experimental)
+- Explicit navigation/adjust control modes with green/amber selection indicators.
+- FX1 now handles Echo; FX2/FX3 reserved for distinct future effects.
+- Consolidated Echo fields into a compact settings row.
+- Cleaner player button labels, timer placement and track notation.
+- Native-resolution pixel-art background images for landscape and portrait.
+- Locked landscape, locked portrait and IMU-driven auto orientation.
+- Reordered Effects before Settings on Home.
+
 ## Unreleased — Phase 5B (`v0.6.0-dev`)
 
 - Add bottom six-control focus strip with PLAY, SPEED, FX-1, FX-2, FX-3, LOOP.

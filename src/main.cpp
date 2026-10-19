@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 5B: Winamp-style focused transport controls.
+// Sound-Chomp Phase 5B.1: Winamp-style controls, effects and adaptive layout.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -7,6 +7,7 @@
 #include <LittleFS.h>
 #include <esp_heap_caps.h>
 #include <math.h>
+#include "retro_background.h"
 
 namespace {
 constexpr uint8_t kScrollAddress=0x40, kEncoderReg=0x10, kButtonReg=0x20, kRgbReg=0x30;
@@ -30,8 +31,16 @@ uint8_t echoWet=35;
 uint16_t echoDelayMs=250;
 bool echoEnabled=false;
 constexpr const char* kFirmwareVersion="v0.6.0-dev";
-enum class PlayerFocus:uint8_t{Play=0,Speed=1,EchoToggle=2,EchoLevel=3,EchoDelay=4,Loop=5};
+enum class PlayerFocus:uint8_t{Play=0,Speed=1,EchoToggle=2,FutureFx2=3,FutureFx3=4,Loop=5};
 PlayerFocus playerFocus=PlayerFocus::Play;
+bool playerEditing=false; // Green selection -> amber adjustment
+enum class OrientationMode:uint8_t{Landscape=0,Portrait=1,Auto=2};
+OrientationMode orientationMode=OrientationMode::Landscape;
+uint8_t displayRotation=1;
+uint8_t portraitRotation=0;
+uint32_t lastOrientationPoll=0, orientationStableAt=0;
+uint8_t orientationCandidate=1;
+uint8_t effectsField=0; // 0=enabled,1=mix,2=delay
 void advancePlayerFocus(){playerFocus=static_cast<PlayerFocus>((static_cast<int>(playerFocus)+1)%6);}
 
 int effectsSelection=0;
@@ -284,8 +293,9 @@ void drawDirectionIcon(int x,int y,bool reverse){
 void drawTapeReels(int w){
   // Both cassette hubs turn counter-clockwise in forward play, clockwise in
   // reverse. Colored tape rings transfer from left/supply to right/take-up.
-  const int cy=41;
-  const int centers[2]={w-66,w-27};
+  const int cy=canvas.height()>canvas.width()?75:41;
+  const bool vertical=canvas.height()>canvas.width();
+  const int centers[2]={vertical?w/2-21:w-66,vertical?w/2+21:w-27};
   const uint32_t now=millis();
   float transport=state==State::Recording?1.0f:(state==State::Playing?speed():0.0f);
   if(state==State::Idle && reelWheelNudgeAt && now-reelWheelNudgeAt<320)
@@ -390,93 +400,116 @@ void drawWaveform(int left,int top,int width,int height){
 }
 // A compact two-tier, six-button transport strip; all geometry fits 240x135.
 void drawTransportButtons(int w,int h){
-  const char* labels[]={"PLAY","SPEED","FX-1","FX-2","FX-3","LOOP"};
-  const int x0=5, gap=1, rightReserve=41;
-  const int bw=(w-2*x0-rightReserve-5*gap)/6;
-  const int y=h-30, bh=27;
+  const bool portrait=h>w;
+  const int columns=portrait?3:6;
+  const int gap=2,x0=5,rightReserve=portrait?0:42;
+  const int area=w-x0*2-rightReserve;
+  const int bw=(area-(columns-1)*gap)/columns;
+  const int bh=portrait?24:27;
+  const int y0=portrait?h-61:h-30;
   for(int i=0;i<6;i++){
-    const int x=x0+i*(bw+gap);
+    const int col=i%columns,row=i/columns;
+    const int x=x0+col*(bw+gap),y=y0+row*(bh+gap);
     const bool selected=int(playerFocus)==i;
-    const uint16_t surface=selected?0x2185:PANEL;
-    canvas.fillRect(x,y,bw,bh,surface);
-    canvas.drawRect(x,y,bw,bh,selected?LIME:TRIM);
-    canvas.drawFastHLine(x+1,y+1,bw-2,selected?WHITE:MUTED);
-    canvas.fillCircle(x+bw-5,y+5,2,selected?GREEN:0x10A2);
+    const uint16_t surface=selected?0x2164:PANEL;
+    const uint16_t border=selected?(playerEditing?YELLOW:LIME):TRIM;
     const uint16_t c=selected?LIME:WHITE;
+    canvas.fillRect(x,y,bw,bh,surface);
+    canvas.drawRect(x,y,bw,bh,border);
+    canvas.drawFastHLine(x+1,y+1,bw-2,selected?WHITE:MUTED);
+    canvas.fillRect(x+bw-5,y+4,3,3,selected?(playerEditing?YELLOW:GREEN):0x10A2);
     const int cx=x+bw/2;
     if(i==0){
-      // Transport triangle
-      canvas.fillTriangle(cx-4,y+6,cx-4,y+15,cx+4,y+10,c);
+      if(state==State::Playing){canvas.fillRect(cx-5,y+6,3,11,c);canvas.fillRect(cx+2,y+6,3,11,c);}
+      else canvas.fillTriangle(cx-5,y+5,cx-5,y+16,cx+5,y+10,c);
     }else if(i==1){
-      canvas.fillTriangle(cx-7,y+7,cx-7,y+14,cx-1,y+10,c);
-      canvas.fillTriangle(cx,y+7,cx,y+14,cx+6,y+10,c);
+      canvas.fillTriangle(cx-8,y+6,cx-8,y+16,cx-1,y+11,c);
+      canvas.fillTriangle(cx,y+6,cx,y+16,cx+7,y+11,c);
+      canvas.setTextColor(c,surface);canvas.setTextSize(1);canvas.setCursor(cx-9,y+18);canvas.print("SPD");
     }else if(i>=2&&i<=4){
-      for(int j=0;j<5;j++){
-        const int ht=(j==2?9:(j==1||j==3?6:3));
-        canvas.fillRect(cx-9+j*4,y+16-ht,3,ht,c);
-      }
+      canvas.setTextColor(i==2?c:MUTED,surface);canvas.setTextSize(1);
+      const char* labs[]={"FX1","FX2","FX3"};
+      canvas.setCursor(cx-9,y+10);canvas.print(labs[i-2]);
+      if(i==2&&echoEnabled)canvas.fillRect(x+3,y+3,3,3,LIME);
     }else{
-      // Circular arrow for loop, green/dark-blue lamp at top right
-      canvas.drawFastHLine(cx-6,y+8,10,c);
-      canvas.drawFastVLine(cx+4,y+8,6,c);
-      canvas.drawFastHLine(cx-5,y+15,10,c);
-      canvas.drawFastVLine(cx-6,y+9,5,c);
-      canvas.fillTriangle(cx+3,y+6,cx+8,y+8,cx+3,y+10,c);
+      // Clean loop arrow with explicit mode text.
+      canvas.drawFastHLine(cx-7,y+6,13,c);
+      canvas.drawFastVLine(cx+5,y+7,5,c);
+      canvas.drawFastHLine(cx-7,y+13,12,c);
+      canvas.drawFastVLine(cx-8,y+8,5,c);
+      canvas.fillTriangle(cx+4,y+4,cx+9,y+6,cx+4,y+8,c);
+      const char* mode=loopMode==LoopMode::Off?"OFF":loopMode==LoopMode::One?"1":"ALL";
+      canvas.setTextColor(c,surface);canvas.setTextSize(1);
+      canvas.setCursor(cx-int(strlen(mode))*3,y+17);canvas.print(mode);
     }
-    canvas.setTextSize(1);canvas.setTextColor(c,surface);
-    canvas.setCursor(x+(bw-int(strlen(labels[i]))*6)/2,y+19);canvas.print(labels[i]);
-    if(i==5)canvas.fillRect(x+2,y+2,3,3,loopMode==LoopMode::Off?0x1027:GREEN);
   }
-  canvas.fillRect(w-42,y,37,bh,PANEL);
-  canvas.drawRect(w-42,y,37,bh,TRIM);
-  const float shownTime=state==State::Playing?playbackSeconds:
-      captured?float(captured)/kSampleRate/fmaxf(0.1f,fabsf(speed())):0.0f;
-  char timeBuf[16];snprintf(timeBuf,sizeof timeBuf,"%.1fs",double(shownTime));
-  canvas.setTextSize(1);canvas.setTextColor(WHITE,PANEL);
-  canvas.setCursor(w-40,y+10);canvas.print(timeBuf);
+  if(!portrait){
+    canvas.fillRect(w-40,y0,35,bh,PANEL);
+    canvas.drawRect(w-40,y0,35,bh,TRIM);
+    char t[16];snprintf(t,sizeof(t),"%.1fs",double(state==State::Playing?playbackSeconds:captured/double(kSampleRate)));
+    canvas.setTextSize(1);canvas.setTextColor(WHITE,PANEL);
+    const int tw=int(strlen(t))*6;canvas.setCursor(w-40+(35-tw)/2,y0+(bh-8)/2);canvas.print(t);
+  }else{
+    char t[16];snprintf(t,sizeof(t),"%.1fs",double(state==State::Playing?playbackSeconds:captured/double(kSampleRate)));
+    canvas.setTextSize(1);canvas.setTextColor(LIME,BG);canvas.setCursor(w-int(strlen(t))*6-7,y0-13);canvas.print(t);
+  }
 }
+
 void drawChomp(){
   const int w=canvas.width(),h=canvas.height();
-  if(state==State::Recording){
-    canvas.fillRect(5,22,w-10,39,RED);
-    const bool flash=(millis()/250)%2==0;
-    canvas.fillCircle(17,36,6,TFT_BLACK);
-    if(flash)canvas.fillCircle(17,36,4,RED);
-    canvas.setTextSize(2);canvas.setTextColor(TFT_BLACK,RED);
-    canvas.setCursor(29,29);canvas.print("RECORDING");
+  const bool portrait=h>w;
+  if(portrait){
+    // Independent vertical composition; leave enough space for 2x3 controls.
+    if(state==State::Recording){
+      canvas.fillRect(5,23,w-10,36,RED);
+      canvas.setTextColor(TFT_BLACK,RED);canvas.setTextSize(2);
+      canvas.setCursor(8,29);canvas.print("REC");
+    }else{
+      const char* heading=state==State::Playing?"PLAYING":state==State::Error?"ERROR":"READY";
+      canvas.setTextSize(2);canvas.setTextColor(accent(),BG);canvas.setCursor(8,25);canvas.print(heading);
+      canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(9,48);
+      canvas.printf("%+.1fx TRK:%d",double(speed()),activeTrack+1);
+    }
+    // Reels lowered for vertical arrangement, using existing art function.
+    drawTapeReels(w);
+    const int left=8,top=94,vw=w-16,vh=67;
+    canvas.drawRect(left-2,top-3,vw+4,vh+6,TRIM);
+    canvas.fillRect(left,top,vw,vh,PANEL);
+    if(state==State::Playing||state==State::Recording)drawSpectrum(left,top,vw,vh);
+    else drawWaveform(left,top,vw,vh);
   }else{
-    const char* heading=state==State::Error?"ERROR":state==State::Playing?"PLAYING":"READY";
-    // Contextual heading while idle; always show PLAYING while the motor runs.
-    if(state==State::Idle){
-      const char* names[]={"READY","SPEED","ECHO","ECHO LVL","ECHO DLY","LOOP"};
-      heading=names[int(playerFocus)];
+    if(state==State::Recording){
+      canvas.fillRect(5,22,w-10,39,RED);
+      if((millis()/250)%2==0)canvas.fillCircle(17,36,4,TFT_BLACK);
+      canvas.setTextSize(2);canvas.setTextColor(TFT_BLACK,RED);
+      canvas.setCursor(29,29);canvas.print("RECORDING");
+    }else{
+      const char* heading=state==State::Playing?"PLAYING":state==State::Error?"ERROR":"READY";
+      canvas.setTextSize(2);canvas.setTextColor(accent(),BG);canvas.setCursor(8,22);canvas.print(heading);
+      canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);canvas.setCursor(9,47);
+      if(playerEditing){
+        switch(playerFocus){
+          case PlayerFocus::Speed:canvas.printf("SPD %+.1fx",double(speed()));break;
+          case PlayerFocus::EchoToggle:canvas.printf("FX1 %s %ums",echoEnabled?"ON":"OFF",unsigned(echoDelayMs));break;
+          case PlayerFocus::Loop:canvas.printf("LOOP %s",loopMode==LoopMode::Off?"OFF":loopMode==LoopMode::One?"1":"ALL");break;
+          default:canvas.printf("%+.1fx TRK:%d",double(speed()),activeTrack+1);break;
+        }
+      }else{
+        canvas.printf("%+.1fx TRK:%d",double(speed()),activeTrack+1);
+        if(state==State::Playing && echoEnabled){canvas.setCursor(9,57);canvas.printf("ECHO:%ums",unsigned(echoDelayMs));}
+      }
     }
-    canvas.setTextSize(2);canvas.setTextColor(accent(),BG);
-    canvas.setCursor(8,22);canvas.print(heading);
-    canvas.setTextSize(1);canvas.setTextColor(playerFocus==PlayerFocus::Speed?accent():WHITE,BG);
-    canvas.setCursor(9,47);
-    switch(playerFocus){
-      case PlayerFocus::Play: canvas.printf("%+.1fx  CHOMP %02d",double(speed()),activeTrack+1);break;
-      case PlayerFocus::Speed: canvas.printf("%+.1fx",double(speed()));break;
-      case PlayerFocus::EchoToggle: canvas.print(echoEnabled?"ECHO ON":"ECHO OFF");break;
-      case PlayerFocus::EchoLevel: canvas.printf("ECHO %u%%",unsigned(echoWet));break;
-      case PlayerFocus::EchoDelay: canvas.printf("%ums",unsigned(echoDelayMs));break;
-      case PlayerFocus::Loop:
-        if(loopMode==LoopMode::Off)canvas.print("LOOP OFF");
-        else if(loopMode==LoopMode::One)canvas.print("LOOP 1");
-        else canvas.printf("ALL (%d)",activeTrack+1);
-        break;
-    }
+    drawTapeReels(w);
+    const int left=8,top=65,vw=w-16,vh=max(12,h-106);
+    canvas.drawRect(left-2,top-3,vw+4,vh+6,TRIM);
+    canvas.fillRect(left,top,vw,vh,PANEL);
+    if(state==State::Playing||state==State::Recording)drawSpectrum(left,top,vw,vh);
+    else drawWaveform(left,top,vw,vh);
   }
-  drawTapeReels(w);
-  const int left=8,top=65,vw=w-16,vh=max(12,h-106);
-  canvas.drawRect(left-2,top-3,vw+4,vh+6,TRIM);
-  canvas.fillRect(left,top,vw,vh,PANEL);
-  if(state==State::Playing||state==State::Recording)drawSpectrum(left,top,vw,vh);
-  else drawWaveform(left,top,vw,vh);
   drawTransportButtons(w,h);
-  if(state==State::Error){canvas.setTextColor(RED,BG);canvas.setTextSize(1);canvas.setCursor(88,51);canvas.print(errorText);}
+  if(state==State::Error){canvas.setTextColor(RED,BG);canvas.setTextSize(1);canvas.setCursor(8,60);canvas.print(errorText);}
 }
+
 void drawMenuIcon(int x,int y,int index,uint16_t color){
   // Small, original 9x9 pixel symbols; distinguishable without reading.
   switch(index){
@@ -491,13 +524,13 @@ void drawMenuIcon(int x,int y,int index,uint16_t color){
 }
 void drawHome(){
   int w=canvas.width(),h=canvas.height();
-  const char* items[]={"CHOMP","TRACKS","SETTINGS","EFFECTS","HOW TO","ABOUT","CHARGE"};
-  // Navigate down the left column (0-3), then down the right (4-6).
-  const int perColumn=4, gap=5, margin=7;
-  const int cw=(w-2*margin-gap)/2;
+  const char* items[]={"CHOMP","TRACKS","EFFECTS","SETTINGS","HOW TO","ABOUT","CHARGE"};
+  // Landscape: two columns. Portrait: one readable column.
+  const int perColumn=h>w?7:4, gap=5, margin=7;
+  const int cw=h>w?w-2*margin:(w-2*margin-gap)/2;
   for(int i=0;i<7;i++){
     int x=margin+(i/perColumn)*(cw+gap);
-    int y=24+(i%perColumn)*24;
+    int y=24+(i%perColumn)*(h>w?28:24);
     bool selected=i==homeSelection;
     uint16_t surface=selected?0x32A5:PANEL;
     canvas.fillRect(x,y,cw,21,surface);
@@ -527,20 +560,22 @@ void drawTracks(){
 }
 void drawSettings(){
   int w=canvas.width(),h=canvas.height();
-  const char* labels[]={"VOLUME","BRIGHT","REVERSE MAP","AUTO PLAY","RESET SPEED"};
-  for(int i=0;i<5;i++){
-    int y=22+i*19;bool sel=settingsSelection==i;
+  const char* labels[]={"VOLUME","BRIGHT","REVERSE MAP","AUTO PLAY","RESET SPEED","ORIENTATION"};
+  const char* shortLabels[]={"VOL","BRGT","REV","AUTO","RESET","ORIENT"};
+  for(int i=0;i<6;i++){
+    int y=21+i*16;bool sel=settingsSelection==i;
     uint16_t surface=sel?0x32A5:PANEL;
-    canvas.fillRect(7,y,w-14,18,surface);
-    canvas.drawRect(7,y,w-14,18,sel?(settingsEditing?YELLOW:LIME):TRIM);
+    canvas.fillRect(7,y,w-14,16,surface);
+    canvas.drawRect(7,y,w-14,16,sel?(settingsEditing?YELLOW:LIME):TRIM);
     canvas.setTextColor(sel?LIME:WHITE,surface);canvas.setTextSize(1);
-    canvas.setCursor(13,y+5);canvas.print(labels[i]);
-    canvas.setCursor(w-75,y+5);
+    canvas.setCursor(13,y+5);canvas.print(h>w?shortLabels[i]:labels[i]);
+    canvas.setCursor(w-(h>w?52:75),y+5);
     if(i==0)canvas.printf("%u%%",unsigned(volumePct));
     else if(i==1)canvas.printf("%u%%",unsigned(brightnessPct));
     else if(i==2)canvas.print(invertedReverse?"INVERTED":"NORMAL");
     else if(i==3)canvas.print(autoPlay?"ON":"OFF");
-    else canvas.print(resetSpeedAfterRecord?"ON":"OFF");
+    else if(i==4)canvas.print(resetSpeedAfterRecord?"ON":"OFF");
+    else canvas.print(orientationMode==OrientationMode::Landscape?"LAND":orientationMode==OrientationMode::Portrait?"VERT":"AUTO");
   }
   canvas.setTextColor(WHITE,BG);canvas.setCursor(7,h-14);
   canvas.print(settingsEditing?"TURN:CHANGE CLICK:DONE":"TURN:SELECT CLICK:EDIT");
@@ -556,7 +591,7 @@ void drawInfoPage(bool about){
     canvas.setCursor(8,92);canvas.print("Sound-Chomp");
   }else{
     const char* keys[]={"TAP A:","HOLD A:","RELEASE:","WHEEL:","CLICK:","HOLD CLICK:","B:"};
-    const char* descriptions[]={"PLAY / STOP","RECORD","STOP RECORDING","ADJUST / NAV","PLAY / NEXT","FOCUS PLAY","MENU"};
+    const char* descriptions[]={"PLAY / STOP","RECORD","STOP RECORDING","NAV / ADJUST","EDIT / PLAY","FOCUS PLAY","MENU"};
     for(int i=0;i<7;i++){
       int y=24+i*14;
       canvas.setTextColor(LIME,BG);canvas.setCursor(8,y);canvas.print(keys[i]);
@@ -578,29 +613,37 @@ void drawCharge(){
   if(charging){canvas.setTextSize(1);canvas.setCursor(92,23);canvas.print("CHARGING");}
 }
 void drawEffects(){
-  canvas.setTextSize(1);canvas.setTextColor(WHITE,BG);
-  canvas.setCursor(9,23);canvas.print("NON-DESTRUCTIVE ECHO");
-  const char* labels[]={"ECHO ENABLE","ECHO MIX","ECHO DELAY"};
+  const int w=canvas.width();
+  const int y=28;
+  canvas.setTextSize(1);canvas.setTextColor(LIME,BG);canvas.setCursor(8,21);canvas.print("EFFECTS / FX-1");
+  canvas.fillRect(5,y,w-10,25,PANEL);canvas.drawRect(5,y,w-10,25,LIME);
+  canvas.setTextSize(1);canvas.setTextColor(WHITE,PANEL);canvas.setCursor(9,y+9);canvas.print("ECHO");
+  const int widths[3]={28,34,45};
+  int xs[3]={w-114,w-83,w-46};
   for(int i=0;i<3;i++){
-    const int y=37+i*24;
-    uint16_t bg=i==effectsSelection?0x32A5:PANEL;
-    canvas.fillRect(7,y,canvas.width()-14,21,bg);
-    canvas.drawRect(7,y,canvas.width()-14,21,i==effectsSelection?(effectsEditing?YELLOW:LIME):TRIM);
-    canvas.setTextSize(1);canvas.setTextColor(WHITE,bg);canvas.setCursor(13,y+7);canvas.print(labels[i]);
-    canvas.setCursor(canvas.width()-79,y+7);
+    const bool active=effectsEditing&&effectsField==i;
+    canvas.fillRect(xs[i],y+4,widths[i],17,active?0x39A6:0x2184);
+    canvas.drawRect(xs[i],y+4,widths[i],17,active?YELLOW:TRIM);
+    canvas.setTextColor(active?YELLOW:WHITE,active?0x39A6:0x2184);
+    canvas.setCursor(xs[i]+3,y+9);
     if(i==0)canvas.print(echoEnabled?"ON":"OFF");
     else if(i==1)canvas.printf("%u%%",unsigned(echoWet));
     else canvas.printf("%ums",unsigned(echoDelayMs));
   }
-  canvas.setTextColor(MUTED,BG);canvas.setCursor(7,canvas.height()-13);
-  canvas.print(effectsEditing?"TURN: ADJUST CLICK: DONE":"TURN: SELECT CLICK: EDIT");
+  canvas.setTextColor(MUTED,BG);canvas.setCursor(8,y+36);canvas.print("FX-2  STUTTER  (SOON)");
+  canvas.setCursor(8,y+51);canvas.print("FX-3  ROBOT    (SOON)");
+  canvas.setCursor(8,canvas.height()-13);
+  canvas.print(effectsEditing?"TURN: CHANGE CLICK: NEXT":"CLICK: EDIT ECHO");
 }
+
 void draw(bool force=false){
   if(!canvasReady)return;
   if(page==Page::Charge&&chargeScreenOff){updateBattery();return;}
   if(!force&&millis()-lastFrame<kFrameMs)return;
   lastFrame=millis();updateBattery();
-  canvas.fillSprite(BG);canvas.drawRect(0,0,canvas.width(),canvas.height(),TRIM);
+  // Static pre-rendered RGB565 art, followed by dynamic off-screen rendering.
+  if(canvas.width()>canvas.height())canvas.pushImage(0,0,240,135,kRetroLandscape);
+  else canvas.pushImage(0,0,135,240,kRetroPortrait);
   drawHeader(page==Page::Home?"SOUND-CHOMP":page==Page::Chomp?"CHOMP / PLAYER":page==Page::Tracks?"TRACKS":page==Page::Effects?"EFFECTS":page==Page::HowTo?"HOW TO":page==Page::About?"ABOUT":page==Page::Charge?"CHARGE":"SETTINGS");
   if(page==Page::Home)drawHome();else if(page==Page::Chomp)drawChomp();
   else if(page==Page::Tracks)drawTracks();else if(page==Page::Settings)drawSettings();
@@ -613,10 +656,8 @@ void handleWheel(int delta){
   if(page==Page::Home)homeSelection=constrain(homeSelection+delta,0,6);
   else if(page==Page::Tracks){trackSelection=constrain(trackSelection+delta,0,kTrackCount-1);trackDeleteConfirm=false;}
   else if(page==Page::Chomp){
-    if(playerFocus==PlayerFocus::Play){
-      // From PLAY, turning the wheel navigates controls rather than altering audio.
-      const int next=constrain(int(playerFocus)+(delta>0?1:-1),0,5);
-      playerFocus=static_cast<PlayerFocus>(next);
+    if(!playerEditing){
+      playerFocus=static_cast<PlayerFocus>(constrain(int(playerFocus)+delta,0,5));
     }else if(playerFocus==PlayerFocus::Speed){
       const int before=speedIndex;
       speedIndex=constrain(speedIndex+delta,0,kSpeedCount-1);
@@ -625,22 +666,21 @@ void handleWheel(int delta){
         else {reelWheelNudge=delta>0?1.7f:-1.7f;reelWheelNudgeAt=millis();tapePosition=constrain(tapePosition+0.035f*float(delta),0.0f,1.0f);}
       }
     }else if(playerFocus==PlayerFocus::EchoToggle){
-      if(delta)echoEnabled=delta>0;
+      // Off at zero; forward wheel positions enable echo and set delay.
+      if(delta<0 && echoDelayMs<=kEchoMinMs)echoEnabled=false;
+      else if(delta>0 && !echoEnabled){echoEnabled=true;echoDelayMs=kEchoMinMs;}
+      else if(echoEnabled)echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*25,kEchoMinMs,kEchoMaxMs));
       markEchoSettingsDirty();
-    }else if(playerFocus==PlayerFocus::EchoLevel){
-      echoWet=uint8_t(constrain(int(echoWet)+delta*5,0,100));markEchoSettingsDirty();
-    }else if(playerFocus==PlayerFocus::EchoDelay){
-      echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*kEchoStepMs,kEchoMinMs,kEchoMaxMs));markEchoSettingsDirty();
     }else if(playerFocus==PlayerFocus::Loop){
-      int value=constrain(int(loopMode)+(delta>0?1:-1),0,2);
-      loopMode=static_cast<LoopMode>(value);
+      loopMode=static_cast<LoopMode>(constrain(int(loopMode)+delta,0,2));
     }
   }else if(page==Page::Effects){
     if(effectsEditing){
-      if(effectsSelection==0&&delta)echoEnabled=delta>0;
-      else if(effectsSelection==1)echoWet=uint8_t(constrain(int(echoWet)+delta*5,0,100));
-      else if(effectsSelection==2)echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*kEchoStepMs,kEchoMinMs,kEchoMaxMs));
-    }else effectsSelection=constrain(effectsSelection+delta,0,2);
+      if(effectsField==0&&delta)echoEnabled=delta>0;
+      else if(effectsField==1)echoWet=uint8_t(constrain(int(echoWet)+delta*5,0,100));
+      else if(effectsField==2)echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*kEchoStepMs,kEchoMinMs,kEchoMaxMs));
+      markEchoSettingsDirty();
+    }
   }else if(page==Page::Settings){
     if(settingsEditing){
       if(settingsSelection==0){volumePct=uint8_t(constrain(int(volumePct)+delta*5,0,100));setVolume();}
@@ -648,7 +688,8 @@ void handleWheel(int delta){
       else if(settingsSelection==2 && delta!=0)invertedReverse=delta>0;
       else if(settingsSelection==3 && delta!=0)autoPlay=delta>0;
       else if(settingsSelection==4 && delta!=0)resetSpeedAfterRecord=delta>0;
-    }else settingsSelection=constrain(settingsSelection+delta,0,4);
+      else if(settingsSelection==5 && delta!=0)orientationMode=static_cast<OrientationMode>(constrain(int(orientationMode)+(delta>0?1:-1),0,2));
+    }else settingsSelection=constrain(settingsSelection+delta,0,5);
   }
 }
 void updateScroll(){
@@ -676,13 +717,13 @@ void updateScroll(){
 }
 void service(){M5.update();updateScroll();}
 void clearEvents(){scrollShort=false;scrollLong=false;}
-void saveSettings(){prefs.putUChar("volume",volumePct);prefs.putUChar("bright",brightnessPct);prefs.putBool("revInvert",invertedReverse);prefs.putBool("autoPlay",autoPlay);prefs.putBool("resetSpd",resetSpeedAfterRecord);}
+void saveSettings(){prefs.putUChar("volume",volumePct);prefs.putUChar("bright",brightnessPct);prefs.putBool("revInvert",invertedReverse);prefs.putBool("autoPlay",autoPlay);prefs.putBool("resetSpd",resetSpeedAfterRecord);prefs.putUChar("orientation",uint8_t(orientationMode));}
 void saveEchoSettings(){prefs.putBool("echoOn",echoEnabled);prefs.putUChar("echoWet",echoWet);prefs.putUShort("echoDelay",echoDelayMs);}
 void backHome(){trackDeleteConfirm=false;aWasDown=false;aHoldStarted=false;if(page==Page::Settings)saveSettings();if(page==Page::Effects)saveEchoSettings();settingsEditing=false;effectsEditing=false;page=Page::Home;clearEvents();draw(true);}
 void openSelection(){
   aWasDown=M5.BtnA.isPressed();aHoldStarted=true;
   page=homeSelection==0?Page::Chomp:homeSelection==1?Page::Tracks:
-       homeSelection==2?Page::Settings:homeSelection==3?Page::Effects:
+       homeSelection==2?Page::Effects:homeSelection==3?Page::Settings:
        homeSelection==4?Page::HowTo:homeSelection==5?Page::About:Page::Charge;
   if(page==Page::Charge){chargeScreenOff=false;chargeLastInteraction=millis();M5.Display.setBrightness(uint8_t(int(brightnessPct)*255/100));}
   clearEvents();draw(true);
@@ -713,13 +754,13 @@ void recordClip(){
 // IMPORTANT: keep a queue of audio ahead of the speaker, and do not modify
 // a buffer until at least two other buffers have been submitted. M5Unified
 // documents three rotating buffers as a safe strategy for generated audio.
-// During playback PLAY-click stops, all other clicks advance focus.
+// During playback, PLAY-click stops; other buttons enter/exit adjustment mode.
 void handlePlayingWheelClick(bool& interrupted){
-  if(scrollLong){scrollLong=false;playerFocus=PlayerFocus::Play;}
+  if(scrollLong){scrollLong=false;playerFocus=PlayerFocus::Play;playerEditing=false;}
   if(scrollShort){
     scrollShort=false;
     if(playerFocus==PlayerFocus::Play)interrupted=true;
-    else advancePlayerFocus();
+    else if(playerFocus!=PlayerFocus::FutureFx2 && playerFocus!=PlayerFocus::FutureFx3)playerEditing=!playerEditing;
   }
 }
 void playClip(){
@@ -812,6 +853,30 @@ void playClip(){
   if(state!=State::Error)state=State::Idle;
   setStateLed();clearEvents();draw(true);
 }
+void updateOrientation(){
+  if(state!=State::Idle || page==Page::Charge)return;
+  const uint32_t now=millis();
+  if(now-lastOrientationPoll<350)return;
+  lastOrientationPoll=now;
+  uint8_t desired=orientationMode==OrientationMode::Portrait?0:1;
+  if(orientationMode==OrientationMode::Auto){
+    // M5Unified IMU is optional; hold last orientation if unavailable.
+    if(M5.Imu.update()){
+      auto data=M5.Imu.getImuData();
+      const float x=data.accel.x,y=data.accel.y;
+      if(fabsf(x)>fabsf(y)*1.40f && fabsf(x)>0.55f)desired=x>0?0:2;
+      else if(fabsf(y)>fabsf(x)*1.40f && fabsf(y)>0.55f)desired=y>0?1:3;
+      else desired=displayRotation;
+    }else desired=displayRotation;
+  }
+  if(desired!=orientationCandidate){orientationCandidate=desired;orientationStableAt=now;}
+  if(desired==displayRotation||now-orientationStableAt<650)return;
+  displayRotation=desired;
+  if(!canvasReady)return;
+  canvas.deleteSprite();M5.Display.setRotation(displayRotation);
+  canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
+  draw(true);
+}
 void splash(){
   if(!canvasReady)return;
   const int w=canvas.width(),h=canvas.height();
@@ -858,13 +923,14 @@ void splash(){
 } // namespace
 
 void setup(){
-  Serial.begin(115200);M5.begin(M5.config());M5.Display.setRotation(1);
+  Serial.begin(115200);M5.begin(M5.config());M5.Display.setRotation(1);displayRotation=1;orientationCandidate=1;
   M5.Power.setExtOutput(true);Wire.begin(kGroveSda,kGroveScl);Wire.setClock(100000);
   prefs.begin("soundchomp",false);
   volumePct=uint8_t(constrain(int(prefs.getUChar("volume",65)),0,100));
   brightnessPct=uint8_t(constrain(int(prefs.getUChar("bright",80)),5,100));
   invertedReverse=prefs.getBool("revInvert",false);autoPlay=prefs.getBool("autoPlay",false);
   resetSpeedAfterRecord=prefs.getBool("resetSpd",true);
+  orientationMode=static_cast<OrientationMode>(constrain(int(prefs.getUChar("orientation",0)),0,2));
   echoEnabled=prefs.getBool("echoOn",false);
   echoWet=uint8_t(constrain(int(prefs.getUChar("echoWet",35)),0,100));
   echoDelayMs=uint16_t(constrain(int(prefs.getUShort("echoDelay",250)),kEchoMinMs,kEchoMaxMs));
@@ -891,13 +957,14 @@ void setup(){
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateWaveform();updateBattery();
-  Serial.println("Sound-Chomp Phase 5B - focused player transport");splash();draw(true);
+  Serial.println("Sound-Chomp Phase 5B.1 - navigation and layout refinement");splash();draw(true);
 }
 void loop(){
   service();
+  updateOrientation();
   if(effectPreferenceDirty && millis()-effectPreferenceChangedAt>1200){saveEchoSettings();effectPreferenceDirty=false;}
   if(M5.BtnB.wasPressed()&&page==Page::Home){
-    page=Page::Chomp;playerFocus=PlayerFocus::Play;clearEvents();draw(true);
+    page=Page::Chomp;playerFocus=PlayerFocus::Play;playerEditing=false;clearEvents();draw(true);
   }else if(M5.BtnB.wasPressed()&&page!=Page::Home){
     if(page==Page::Tracks&&trackDeleteConfirm){trackDeleteConfirm=false;draw(true);}
     else backHome();
@@ -921,9 +988,9 @@ void loop(){
     if(state==State::Idle&&scrollShort){
       scrollShort=false;
       if(playerFocus==PlayerFocus::Play)playClip();
-      else advancePlayerFocus();
+      else if(playerFocus!=PlayerFocus::FutureFx2 && playerFocus!=PlayerFocus::FutureFx3)playerEditing=!playerEditing;
     }
-    if(scrollLong){playerFocus=PlayerFocus::Play;scrollLong=false;}
+    if(scrollLong){playerFocus=PlayerFocus::Play;playerEditing=false;scrollLong=false;}
   }else if(page==Page::Tracks){
     if(trackDeleteConfirm){
       if(scrollShort||M5.BtnA.wasPressed()){
@@ -947,7 +1014,7 @@ void loop(){
     if(!chargeScreenOff&&millis()-chargeLastInteraction>12000){chargeScreenOff=true;M5.Display.setBrightness(0);}
     scrollLong=false;
   }else if(page==Page::Effects){
-    if(M5.BtnA.wasPressed()||scrollShort){scrollShort=false;effectsEditing=!effectsEditing;if(!effectsEditing)saveEchoSettings();}
+    if(M5.BtnA.wasPressed()||scrollShort){scrollShort=false;if(!effectsEditing){effectsEditing=true;effectsField=0;}else if(effectsField<2)effectsField++;else {effectsEditing=false;saveEchoSettings();}}
     scrollLong=false;
   }else if(page==Page::HowTo||page==Page::About){
     scrollShort=false;scrollLong=false;
