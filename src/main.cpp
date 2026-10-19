@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 5E: Winamp-style controls, effects and adaptive layout.
+// Sound-Chomp Phase 5F.1: portrait alignment, FX feedback, audio-start mitigation.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -41,7 +41,7 @@ constexpr size_t kStutterCapacity=kSampleRate*400/1000;
 int16_t* stutterHistory=nullptr;
 size_t stutterPos=0, stutterFilled=0;
 uint32_t effectSampleClock=0;
-constexpr const char* kFirmwareVersion="v0.7.0-dev";
+constexpr const char* kFirmwareVersion="v0.7.1-dev";
 enum class PlayerFocus:uint8_t{Play=0,Speed=1,EchoToggle=2,Stutter=3,Robot=4,Loop=5};
 PlayerFocus playerFocus=PlayerFocus::Play;
 bool playerEditing=false; // Green selection -> amber adjustment
@@ -454,7 +454,7 @@ void drawTransportButtons(int w,int h){
   const int area=portrait?w-2*x0:w-2*x0-timerWidth-timerGap;
   const int bw=(area-(columns-1)*gap)/columns;
   const int bh=portrait?27:27;
-  const int y0=portrait?h-65:h-30;
+  const int y0=portrait?h-62:h-30;
   for(int i=0;i<6;i++){
     const int col=i%columns,row=i/columns;
     const int x=x0+col*(bw+gap),y=y0+row*(bh+gap);
@@ -499,8 +499,8 @@ void drawTransportButtons(int w,int h){
     const int tw=timeWidth(t);
     drawTimeLabel(tx+(timerWidth+tw)/2,y0+(bh-12)/2,t);
   }else{
-    canvas.setTextSize(1);canvas.setTextColor(themeAccent());
-    canvas.setCursor(w-int(strlen(t))*6-7,y0-13);canvas.print(t);
+    // Same atlas glyphs as landscape, horizontally centered beneath visualizer.
+    drawTimeLabel((w+timeWidth(t))/2,y0-13,t);
   }
 }
 
@@ -524,13 +524,28 @@ void drawCompactStatus(int areaLeft,int areaWidth,int y,bool center){
   canvas.setCursor(x+24,y);canvas.print(text);
 }
 
+// Compact detail line shared by both orientations. Keep labels human-readable
+// and within the 135px portrait viewport (single row, no automatic wrapping).
+void drawPlayerEditStatus(int x,int y){
+  canvas.setTextSize(1);canvas.setTextColor(WHITE);
+  canvas.setCursor(x,y);
+  switch(playerFocus){
+    case PlayerFocus::Speed:canvas.printf("SPEED %+.1fx",double(speed()));break;
+    case PlayerFocus::EchoToggle:canvas.printf("ECHO %s %ums",echoEnabled?"ON":"OFF",unsigned(echoDelayMs));break;
+    case PlayerFocus::Stutter:canvas.printf("STUTTER %s %ums",stutterEnabled?"ON":"OFF",unsigned(stutterSliceMs));break;
+    case PlayerFocus::Robot:canvas.printf("ROBOT %s %u%%",robotEnabled?"ON":"OFF",unsigned(robotIntensity));break;
+    case PlayerFocus::Loop:canvas.printf("LOOP %s",loopMode==LoopMode::Off?"OFF":loopMode==LoopMode::One?"1":"ALL");break;
+    default:drawCompactStatus(x,canvas.width()-2*x,y,canvas.height()>canvas.width());break;
+  }
+}
+
 void drawChomp(){
   const int w=canvas.width(),h=canvas.height();
   const bool portrait=h>w;
   if(portrait){
     // Independent vertical composition; leave enough space for 2x3 controls.
     if(state==State::Recording){
-      canvas.fillRect(5,23,w-10,36,RED);
+      canvas.fillRect(5,23,w-10,35,RED);
       const int dotR=4;
       const int recWidth=3*12;
       const int combined=dotR*2+6+recWidth;
@@ -543,11 +558,13 @@ void drawChomp(){
       canvas.setTextSize(2);canvas.setTextColor(accent());
       const int titleX=(w-canvas.textWidth(heading))/2;
       canvas.setCursor(titleX,28);canvas.print(heading);
-      drawCompactStatus(4,w-8,51,true);
+      if(playerEditing)drawPlayerEditStatus(5,50);
+      else drawCompactStatus(4,w-8,50,true);
     }
     // Reels lowered for vertical arrangement, using existing art function.
     drawTapeReels(w);
-    const int left=8,top=97,vw=w-16,vh=65;
+    // Shorter visualizer with its bottom kept clear of the centered timer.
+    const int left=8,top=99,vw=w-16,vh=62;
     canvas.drawRect(left-2,top-3,vw+4,vh+6,TRIM);
     canvas.fillRect(left,top,vw,vh,PANEL);
     if(state==State::Playing||state==State::Recording)drawSpectrum(left,top,vw,vh);
@@ -561,17 +578,8 @@ void drawChomp(){
     }else{
       const char* heading=state==State::Playing?"PLAYING":state==State::Error?"ERROR":"READY";
       canvas.setTextSize(2);canvas.setTextColor(accent());canvas.setCursor(8,25);canvas.print(heading);
-      if(playerEditing){
-        canvas.setTextSize(1);canvas.setTextColor(WHITE);canvas.setCursor(9,49);
-        switch(playerFocus){
-          case PlayerFocus::Speed:canvas.printf("SPD %+.1fx",double(speed()));break;
-          case PlayerFocus::EchoToggle:canvas.printf("FX1 %s %ums",echoEnabled?"ON":"OFF",unsigned(echoDelayMs));break;
-          case PlayerFocus::Stutter:canvas.printf("FX2 %s %ums",stutterEnabled?"ON":"OFF",unsigned(stutterSliceMs));break;
-          case PlayerFocus::Robot:canvas.printf("FX3 %s %u%%",robotEnabled?"ON":"OFF",unsigned(robotIntensity));break;
-          case PlayerFocus::Loop:canvas.printf("LOOP %s",loopMode==LoopMode::Off?"OFF":loopMode==LoopMode::One?"1":"ALL");break;
-          default:drawCompactStatus(9,132,49,false);break;
-        }
-      }else drawCompactStatus(9,132,49,false);
+      if(playerEditing)drawPlayerEditStatus(9,49);
+      else drawCompactStatus(9,132,49,false);
     }
     drawTapeReels(w);
     const int left=8,top=65,vw=w-16,vh=max(12,h-103);
@@ -895,7 +903,14 @@ void playClip(){
   M5.Mic.end();
   resetPlaybackEffects();
   if(!M5.Speaker.begin()){state=State::Error;errorText="SPEAKER BEGIN FAILED";return;}
-  setVolume();state=State::Playing;setStateLed();clearEvents();draw(true);
+  setVolume();
+  // On the first playback after power-up, give the speaker/amp a brief period
+  // to stabilize BEFORE advancing the source cursor. This mitigates reports
+  // of missing attack transients without dropping or modifying PCM samples.
+  static bool firstSpeakerStart=true;
+  const bool primeSpeakerOnThisPlay=firstSpeakerStart;
+  if(firstSpeakerStart){delay(60);firstSpeakerStart=false;}
+  state=State::Playing;setStateLed();clearEvents();draw(true);
   double cursor=speed()<0?double(captured-1):0.0;
   tapePosition=captured?float(cursor)/float(captured):0.0f;
   playbackSeconds=0.0f;
@@ -907,6 +922,16 @@ void playClip(){
   unsigned queued=0;
   size_t chunksMade=0;
   constexpr uint8_t kChannel=0;
+  if(primeSpeakerOnThisPlay){
+    // A brief silence pre-roll opens the output path while keeping every
+    // original recording sample queued intact. Uses the first backing buffer
+    // so it remains valid until the speaker consumes the silent segment.
+    constexpr size_t kPrerollSamples=256; // 16 ms at 16 kHz
+    memset(playChunks[0],0,kPrerollSamples*sizeof(int16_t));
+    if(!M5.Speaker.playRaw(playChunks[0],kPrerollSamples,kSampleRate,false,1,kChannel,false)){
+      state=State::Error;errorText="SPEAKER PREROLL FAILED";
+    }else queued=1;
+  }
   while(!interrupted&&state==State::Playing){
     service();
     if(M5.BtnB.wasPressed()){interrupted=true;backHome();break;}
@@ -1107,7 +1132,7 @@ void setup(){
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateWaveform();updateBattery();
-  Serial.println("Sound-Chomp Phase 5E - echo tail, stutter and robot effects");splash();draw(true);
+  Serial.println("Sound-Chomp Phase 5F.1 - portrait UI and startup audio mitigation");splash();draw(true);
 }
 void loop(){
   service();

@@ -172,3 +172,9 @@ This is a source prototype, not yet compiled or hardware validated.
 - Add optional `tools/pack_spritesheet.py`, atlas-guide validation and `--validate-only` mode.
 - Draft future skin metadata contract; no runtime loading or USB functionality yet.
 - Keep audio effects, recording format and saved-track handling unchanged.
+
+## Phase 5F.1 — Portrait player polish and first-play audio mitigation
+- Lowered portrait controls, centered theme-colored atlas clock, and reduced visualizer height.
+- Added live edit details in portrait and full effect names in landscape.
+- Shortened portrait REC banner by 1px and raised status text by 1px.
+- Added one-time post-boot speaker settle and silent preroll to protect initial clip samples.
