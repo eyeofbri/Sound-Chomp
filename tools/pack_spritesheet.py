@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Opt-in, deterministic compact atlas packing. Requires Pillow (only for repacking).
-Rewrites PNG + JSON together, keeping 1px magenta guides OUTSIDE all crop rectangles.
+Rewrites PNG + JSON together, keeping 1px yellow guides OUTSIDE all crop rectangles.
 Never run as part of a firmware build: artists control when coordinates change.
 """
 from pathlib import Path
@@ -61,7 +61,7 @@ def main():
     for name in sorted(slices):
         x,y,tw,th=layout[name]; im=slices[name]
         sx,sy=x+2,y+2
-        d.rectangle((sx-1,sy-1,sx+im.width,sy+im.height),outline=(255,0,255,255))
+        d.rectangle((sx-1,sy-1,sx+im.width,sy+im.height),outline=(255,255,0,255))
         out.paste(im,(sx,sy))
         data['sprites'][name]['x']=sx;data['sprites'][name]['y']=sy
     data['meta']['width']=width;data['meta']['height']=height

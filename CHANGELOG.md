@@ -1,3 +1,10 @@
+## Phase 5H.6 — Background color rollback
+
+- Restore proven green-dominant background recoloring for all three built-in skins.
+- Recolor edited CLASSIC magenta background gradients back to green shades.
+- Retain yellow atlas editing guide frames and magenta icon color keys.
+- Add regression test. No functional audio or UI changes.
+
 ## Unreleased — Phase 5H.3 (palette terminology and header alignment)
 - Rename Settings THEME to PALETTE (PAL on portrait) without changing stored palette selections.
 - Lower player-only header artwork, title, and battery by 1px in landscape and portrait.
@@ -217,3 +224,9 @@ This is a source prototype, not yet compiled or hardware validated.
 - Added USB-serial installer that stages a `.skin` file without bulk filesystem upload or recording replacement.
 - Kept firmware-owned teeth branding, procedural reels, audio path, recording filesystem and Phase 5F.2 portrait geometry unchanged.
 - No USB Mass Storage or multi-skin browser yet; this is a hardware-unverified development build.
+
+## Phase 5H.4 (development)
+- Replace 1px magenta atlas guide borders with yellow (`#FFFF00`) borders across all built-in skins.
+- Use exact magenta-keyed shading for recolorable background pixels; remove fuzzy green-dominant hue detection.
+- Update PNG validators, optional packer, manifest and customization documentation.
+- Preserve hardware-tested Phase 5H.3 functionality; device build/test pending.

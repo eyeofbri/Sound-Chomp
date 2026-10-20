@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate Sound-Chomp atlas header automatically during PlatformIO builds.
 Pure standard-library PNG reader, supports non-interlaced RGB/RGBA 8-bit PNG.
-Magenta guides fall outside mapped crop rectangles and never enter output.
+Yellow guides fall outside mapped crop rectangles and never enter output.
 """
 from pathlib import Path
 import json, struct, zlib, sys
@@ -45,6 +45,17 @@ def load_png(path):
         prev=row
     return w,h,rows
 
+def palette_tint(r,g,b,a,primary):
+    """Legacy green-based background recolor. GREEN uses authored artwork.
+
+    RED/BLUE recolor only visibly green-dominant pixels. This is the
+    Phase 5H.3 behavior that passed the user's device tests.
+    """
+    if primary != (0,255,0) and a >= 128 and g > max(r,b)*1.18 and g > 18:
+        strength = g / 255.0
+        return tuple(min(255, int(c * strength)) for c in primary)
+    return r,g,b
+
 def rgb565(r,g,b):return ((r>>3)<<11)|((g>>2)<<5)|(b>>3)
 def swapped(v):return ((v&255)<<8)|(v>>8)
 def cident(name):return ''.join(part.capitalize() for part in name.split('_'))
@@ -69,11 +80,11 @@ for name,s in info['sprites'].items():
         if rect[0]<other_rect[2] and rect[2]>other_rect[0] and rect[1]<other_rect[3] and rect[3]>other_rect[1]:
             raise ValueError(f'Overlapping sprites/guides: {name} and {other}')
     used.append((name,rect))
-    # A guide is a 1px magenta frame just outside the crop. It's not firmware art.
+    # A guide is a 1px yellow frame just outside the crop. It's not firmware art.
     border=[rows[y-1][px] for px in range(x-1,x+sw+1)] + [rows[y+sh][px] for px in range(x-1,x+sw+1)]
     border += [rows[py][x-1] for py in range(y,y+sh)] + [rows[py][x+sw] for py in range(y,y+sh)]
-    if any(pixel[:3]!=(255,0,255) or pixel[3]!=255 for pixel in border):
-        raise ValueError(f'Missing or damaged magenta guide frame: {name}')
+    if any(pixel[:3]!=(255,255,0) or pixel[3]!=255 for pixel in border):
+        raise ValueError(f'Missing or damaged yellow guide frame: {name}')
 print(f'Validated {len(used)} sprites and guides in {w}x{h} atlas')
 if '--validate-only' in sys.argv: sys.exit(0)
 lines=['#pragma once','#include <Arduino.h>',
@@ -86,18 +97,13 @@ for name,s in info['sprites'].items():
     assert x>=1 and y>=1 and x+sw<w and y+sh<h,(name,s)
     pix=[pixel for row in rows[y:y+sh] for pixel in row[x:x+sw]]
     if name.startswith('bg_'):
-        # Keep one canonical source image. Generate palette-shifted player-only
-        # backgrounds at build time (metallic/gray components are preserved).
+        # Background shading uses ONLY the explicit magenta ramp: (N,0,N),
+        # N>=20. Fixed-color pixels remain exactly as authored. Each theme
+        # receives the same value-scaled accent, including GREEN.
         for suffix,primary in [('Green',(0,255,0)),('Red',(255,0,0)),('Blue',(0,255,247))]:
             values=[]
             for r,g,b,a in pix:
-                if suffix!='Green' and g>max(r,b)*1.18 and g>18:
-                    # The source green channel controls intensity; maintain
-                    # dark graduated shading in the resulting accent color.
-                    intensity=g/255.0
-                    r,g,b=(min(255,int(primary[0]*intensity)),
-                           min(255,int(primary[1]*intensity)),
-                           min(255,int(primary[2]*intensity)))
+                r,g,b=palette_tint(r,g,b,a,primary)
                 values.append(swapped(rgb565(r,g,b)))
             prefix='kRetroLandscape' if name=='bg_landscape' else 'kRetroPortrait'
             ident=prefix+suffix

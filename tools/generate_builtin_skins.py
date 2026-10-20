@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Generate built-in alternative skins from fixed-coordinate PNG templates.
-Users may recolor pixels but must not move sprites or alter magenta guides.
+Users may recolor pixels but must not move sprites or alter yellow guides.
 The locked canonical JSON always supplies the coordinates.
 """
 from pathlib import Path
 import json
-from generate_ui_assets import load_png,rgb565,swapped,cident
+from generate_ui_assets import load_png,rgb565,swapped,cident,palette_tint
 ROOT=Path(__file__).resolve().parents[1]
 MAP=json.loads((ROOT/'assets/ui/sound_chomp_spritesheet.json').read_text())
 OUT=ROOT/'include/generated/builtin_skins.h'
@@ -20,14 +20,13 @@ for style in ('minimal','arcade'):
   x,y,sw,sh=[rec[k] for k in ('x','y','w','h')]
   border=[rows[y-1][px] for px in range(x-1,x+sw+1)]+[rows[y+sh][px] for px in range(x-1,x+sw+1)]
   border += [rows[py][x-1] for py in range(y,y+sh)]+[rows[py][x+sw] for py in range(y,y+sh)]
-  if any(p!=(255,0,255,255) for p in border):raise ValueError(f'{style}: damaged guide {name}')
+  if any(p!=(255,255,0,255) for p in border):raise ValueError(f'{style}: damaged guide {name}')
   pix=[p for row in rows[y:y+sh] for p in row[x:x+sw]]
   if name.startswith('bg_'):
    for theme,rgb in [('Green',(0,255,0)),('Red',(255,0,0)),('Blue',(0,255,247))]:
     values=[]
     for r,g,b,a in pix:
-     if theme!='Green' and g>max(r,b)*1.18 and g>18:
-      k=g/255.;r,g,b=tuple(min(255,int(c*k)) for c in rgb)
+     r,g,b=palette_tint(r,g,b,a,rgb)
      values.append(swapped(rgb565(r,g,b)))
     ident=f'{style}_{name}_{theme}'
     lines.append(f'const uint16_t {ident}[{sw*sh}] PROGMEM={{')

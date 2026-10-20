@@ -105,7 +105,7 @@ Edit the source PNG at `assets/ui/sound_chomp_spritesheet.png`; keep the crop re
 
 ### Phase 5F: editable skins groundwork
 
-The bundled skin atlas is now compact (244x383) and has 44 editable sprites. The Sound-Chomp teeth logo is deliberately stored in `include/branding.h` rather than in the atlas; it still follows the primary theme color. Builds **automatically validate** the magenta guide frames and regenerate firmware image assets. For optional deterministic repacking of the PNG + JSON, use `python tools/pack_spritesheet.py` (requires Pillow). See `docs/phase5f-skin-foundations.md`.
+The bundled skin atlas is now compact (244x383) and has 44 editable sprites. The Sound-Chomp teeth logo is deliberately stored in `include/branding.h` rather than in the atlas; it still follows the primary theme color. Builds **automatically validate** the yellow guide frames and regenerate firmware image assets. For optional deterministic repacking of the PNG + JSON, use `python tools/pack_spritesheet.py` (requires Pillow). See `docs/phase5f-skin-foundations.md`.
 
 `skins/examples/skin.json` specifies an early proposal for a future skin package; **USB transfers and runtime custom-skin loading do not exist yet**.
 
@@ -116,3 +116,11 @@ See `docs/phase5h-usb-skins.md`. No PySerial: choose USB SKINS in Settings, copy
 ### Phase 5H.3 — Palette label and player header alignment
 
 Settings calls the GREEN/RED/BLUE color selection **PALETTE** (abbreviated **PAL** on the compact portrait Settings display); SKIN remains independent. The existing `theme` Preferences key is intentionally retained for compatibility. On the CHOMP player screen only, the teeth, SOUND-CHOMP text, battery frame/fill/terminal and landscape battery percentage shift down 1 pixel in both orientations; other screens retain their current header positions.
+
+### Phase 5H.4 — Explicit palette keys
+
+Spritesheet guides are now **yellow**, not magenta. Editable art uses magenta for the primary color and an exact magenta brightness ramp in backgrounds; fixed colors are never auto-detected or hue-shifted. See [Phase 5H.4](docs/phase5h4-palette-keys.md).
+
+### Current skin color conventions (Phase 5H.6)
+
+Background gradient areas that follow the selected palette use **green shades** (the working original algorithm). Exact magenta in UI icons remains the primary color key. **Yellow** outer sprite guides are editor-only and never compiled. See `docs/phase5h6-green-background-rollback.md`.

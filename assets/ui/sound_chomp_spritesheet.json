@@ -4,22 +4,24 @@
     "width": 244,
     "height": 383,
     "pixel_scale": 1,
-    "version": "2.0.0",
+    "version": "2.1.0",
     "format": "RGBA8888",
     "coordinate_origin": "top-left",
     "rectangles": "zero-based; x/y inclusive, right/bottom exclusive",
     "firmware_baseline": "Phase 5F",
-    "guide_border_rule": "A 1px #FF00FF guide border may surround a sprite outside its crop rect. The guide border is never part of the firmware crop.",
+    "guide_border_rule": "1px solid #FFFF00 (opaque yellow) border outside every sprite crop, excluded from firmware output. Do not edit.",
     "theme_keys": {
-      "#FF00FF": "theme.primary",
-      "#00FFFF": "theme.secondary"
+      "#FF00FF": "primary at 100% intensity (also valid in non-background sprites)",
+      "#140014..#FF00FF": "background-only primary intensity ramp: RGB (N,0,N) for N>=20; maps to primary * N/255",
+      "#00FFFF": "secondary palette replacement in non-background sprites"
     },
     "note": "Editable skin art only. Logo/teeth are protected in include/branding.h; audio UI controls remain firmware-owned.",
     "skin_contract": "sound-chomp-atlas-v1",
     "brand_exclusions": [
       "icon_teeth"
     ],
-    "packing": "deterministic MaxRects, 1px border, 1px padding; optional tools/pack_spritesheet.py"
+    "packing": "deterministic MaxRects, 1px border, 1px padding; optional tools/pack_spritesheet.py",
+    "background_palette_method": "Exact keyed magenta ramp ONLY. No dominant-green hue detection. Fixed pixels are preserved."
   },
   "sprites": {
     "bg_landscape": {
