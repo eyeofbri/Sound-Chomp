@@ -312,18 +312,19 @@ void drawTeeth(int x,int y){
 }
 void drawHeader(const char* title){
   int w=canvas.width();
+  const int headerShift=(page==Page::Chomp)?1:0; // Play screen only: move entire header content 1px down.
   // Player skins own their complete background, including the title strip.
   // Other screens retain the neutral, opaque header surface.
   if(page!=Page::Chomp)canvas.fillRect(2,2,w-4,17,PANEL);
-  canvas.setTextSize(1);canvas.setTextColor(themeAccent());canvas.setCursor(24,7);canvas.print("SOUND-CHOMP");
-  drawTeeth(7,5);
+  canvas.setTextSize(1);canvas.setTextColor(themeAccent());canvas.setCursor(24,7+headerShift);canvas.print("SOUND-CHOMP");
+  drawTeeth(7,5+headerShift);
   int batteryX=w-22;
-  canvas.drawRect(batteryX,7,15,8,themeAccent());
-  canvas.fillRect(batteryX-3,9,3,4,themeAccent()); // battery terminal on left
-  canvas.fillRect(batteryX+2,9,constrain((int(batteryPct)*11)/100,0,11),4,batteryPct<20?palette().warning:themeAccent());
+  canvas.drawRect(batteryX,7+headerShift,15,8,themeAccent());
+  canvas.fillRect(batteryX-3,9+headerShift,3,4,themeAccent()); // battery terminal on left
+  canvas.fillRect(batteryX+2,9+headerShift,constrain((int(batteryPct)*11)/100,0,11),4,batteryPct<20?palette().warning:themeAccent());
   // Portrait title needs the entire width; omit battery percentage there.
   if(canvas.width()>canvas.height()){
-    canvas.setTextColor(themeAccent());canvas.setCursor(batteryX-31,7);
+    canvas.setTextColor(themeAccent());canvas.setCursor(batteryX-31,7+headerShift);
     canvas.printf("%u%%",unsigned(batteryPct));
   }
   // Charging shown by percentage/status; avoid an orphan contrasting pixel within the fill.
@@ -663,8 +664,8 @@ void drawTracks(){
 }
 void drawSettings(){
   int w=canvas.width(),h=canvas.height();
-  const char* labels[]={"VOLUME","BRIGHT","REVERSE MAP","AUTO PLAY","RESET SPEED","ORIENTATION","THEME","SKIN"};
-  const char* shortLabels[]={"VOL","BRGT","REV","AUTO","RESET","ORIENT","THEME","SKIN"};
+  const char* labels[]={"VOLUME","BRIGHT","REVERSE MAP","AUTO PLAY","RESET SPEED","ORIENTATION","PALETTE","SKIN"};
+  const char* shortLabels[]={"VOL","BRGT","REV","AUTO","RESET","ORIENT","PAL","SKIN"};
   const int visible=h>w?8:7;
   const int scrollTop=constrain(settingsSelection-visible+1,0,8-visible);
   // Reserve a slim right-hand gutter so additional settings are discoverable.

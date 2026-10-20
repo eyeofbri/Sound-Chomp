@@ -1,3 +1,8 @@
+## Unreleased — Phase 5H.3 (palette terminology and header alignment)
+- Rename Settings THEME to PALETTE (PAL on portrait) without changing stored palette selections.
+- Lower player-only header artwork, title, and battery by 1px in landscape and portrait.
+- Preserve skin generation, all audio processing, layout and recording behavior.
+
 ## Phase 5H.2 — Built-in skins
 - Replace experimental USB / runtime skins with three compiled choices: CLASSIC, MINIMAL, ARCADE.
 - Preserve fixed canonical manifest, themes, protected branding and clean player backgrounds.

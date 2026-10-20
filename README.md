@@ -112,3 +112,7 @@ The bundled skin atlas is now compact (244x383) and has 44 editable sprites. The
 
 ## Phase 5H: drag-and-drop USB skins
 See `docs/phase5h-usb-skins.md`. No PySerial: choose USB SKINS in Settings, copy USER.SKN to the temporary drive, eject, then press A.
+
+### Phase 5H.3 — Palette label and player header alignment
+
+Settings calls the GREEN/RED/BLUE color selection **PALETTE** (abbreviated **PAL** on the compact portrait Settings display); SKIN remains independent. The existing `theme` Preferences key is intentionally retained for compatibility. On the CHOMP player screen only, the teeth, SOUND-CHOMP text, battery frame/fill/terminal and landscape battery percentage shift down 1 pixel in both orientations; other screens retain their current header positions.
