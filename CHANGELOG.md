@@ -1,3 +1,21 @@
+## Phase 5H.2 — Built-in skins
+- Replace experimental USB / runtime skins with three compiled choices: CLASSIC, MINIMAL, ARCADE.
+- Preserve fixed canonical manifest, themes, protected branding and clean player backgrounds.
+- Keep LittleFS audio and effects unchanged.
+
+## Phase 5H.1 — USB media + skin background hotfix
+
+- Correct multi-sector USB MSC callback range handling to address Windows no-media failure.
+- Mark MSC RAM disk writable and reject writes after eject.
+- Show skin backgrounds under player header and visualizer instead of solid panel fills.
+- Add visible narrow Settings scrollbar and tighten Settings item width.
+- Document compiled USER.SKN format and Python-only skin build workflow.
+
+## Phase 5H (USB Skin Drive prototype)
+- Add PSRAM FAT12 USB Mass Storage drive for drag-and-drop skin installation.
+- Reuse Phase 5G skin validator and retain private LittleFS recordings partition.
+- Add Settings USB SKINS action and Eject/press-A flow.
+
 ## Phase 5F.2 — Portrait layout refinement
 
 - Lower portrait reels by 1px without modifying landscape reel positioning.
@@ -185,3 +203,12 @@ This is a source prototype, not yet compiled or hardware validated.
 - Added live edit details in portrait and full effect names in landscape.
 - Shortened portrait REC banner by 1px and raised status text by 1px.
 - Added one-time post-boot speaker settle and silent preroll to protect initial clip samples.
+
+## Phase 5G — Runtime user skins (v0.8.0-dev)
+
+- Added validated external `User` skin stored in LittleFS and rendered from PSRAM, with compiled `Classic` fallback.
+- Added Settings > SKIN (Classic/User), persisted through Preferences.
+- Added standard-library Python custom-skin compiler with full native dimensions / magenta guide validation.
+- Added USB-serial installer that stages a `.skin` file without bulk filesystem upload or recording replacement.
+- Kept firmware-owned teeth branding, procedural reels, audio path, recording filesystem and Phase 5F.2 portrait geometry unchanged.
+- No USB Mass Storage or multi-skin browser yet; this is a hardware-unverified development build.

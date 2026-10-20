@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 5F.2: portrait reel, visualizer and centered status polish.
+// Sound-Chomp Phase 5H.2: three compiled skins, fixed atlas coordinates.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -9,6 +9,7 @@
 #include <math.h>
 #include "generated/ui_assets.h"
 #include "branding.h"
+#include "generated/builtin_skins.h"
 
 namespace {
 constexpr uint8_t kScrollAddress=0x40, kEncoderReg=0x10, kButtonReg=0x20, kRgbReg=0x30;
@@ -41,7 +42,7 @@ constexpr size_t kStutterCapacity=kSampleRate*400/1000;
 int16_t* stutterHistory=nullptr;
 size_t stutterPos=0, stutterFilled=0;
 uint32_t effectSampleClock=0;
-constexpr const char* kFirmwareVersion="v0.7.1-dev";
+constexpr const char* kFirmwareVersion="v0.8.0-dev";
 enum class PlayerFocus:uint8_t{Play=0,Speed=1,EchoToggle=2,Stutter=3,Robot=4,Loop=5};
 PlayerFocus playerFocus=PlayerFocus::Play;
 bool playerEditing=false; // Green selection -> amber adjustment
@@ -197,6 +198,7 @@ uint32_t chargeLastInteraction=0;
 bool aWasDown=false,aHoldStarted=false;uint32_t aPressedAt=0;
 int homeSelection=0,settingsSelection=0;
 uint8_t themeSelection=0; // 0=GREEN, 1=RED, 2=BLUE
+uint8_t skinSelection=0; // 0=CLASSIC, 1=MINIMAL, 2=ARCADE (compiled)
 float playbackSeconds=0.0f;
 // Position in the currently selected clip. 0=all tape on supply, 1=all on take-up.
 float tapePosition=0.0f;
@@ -280,13 +282,25 @@ void updateBattery(){
   batteryPct=uint8_t(constrain(int(M5.Power.getBatteryLevel()),0,100));
   charging=M5.Power.isCharging();
 }
+// Fixed coordinates: alternative artwork is compiled from PNGs using the
+// firmware-owned canonical manifest. Skins never touch LittleFS recordings.
+const uint32_t* skinPixels(const ChompArt::Sprite& sprite){
+  if(skinSelection==0)return sprite.pixels;
+  return ChompBuiltins::spritePixels(skinSelection,sprite);
+}
+const uint16_t* skinBackground(bool portrait){
+  if(skinSelection==0)return nullptr;
+  return ChompBuiltins::background(skinSelection,themeSelection,portrait);
+}
+
 // Canonical sprite drawing: exact image pixels, guide borders excluded at export.
 // Transparent=skip, opaque #FF00FF=theme primary, #00FFFF=secondary.
 void drawAtlasSprite(const ChompArt::Sprite& sprite,int x,int y,uint16_t primary,uint16_t secondary=0){
   if(!secondary)secondary=palette().secondary;
+  const uint32_t* pixels=skinPixels(sprite);
   for(int py=0;py<sprite.h;++py){
     for(int px=0;px<sprite.w;++px){
-      const uint32_t c=sprite.pixels[py*sprite.w+px];
+      const uint32_t c=pixels[py*sprite.w+px];
       if(c==0)continue;
       const uint16_t out=c==0x10000?primary:(c==0x20000?secondary:uint16_t(c&0xffff));
       canvas.drawPixel(x+px,y+py,out);
@@ -298,8 +312,10 @@ void drawTeeth(int x,int y){
 }
 void drawHeader(const char* title){
   int w=canvas.width();
-  canvas.fillRect(2,2,w-4,17,PANEL);
-  canvas.setTextSize(1);canvas.setTextColor(themeAccent(),PANEL);canvas.setCursor(24,7);canvas.print("SOUND-CHOMP");
+  // Player skins own their complete background, including the title strip.
+  // Other screens retain the neutral, opaque header surface.
+  if(page!=Page::Chomp)canvas.fillRect(2,2,w-4,17,PANEL);
+  canvas.setTextSize(1);canvas.setTextColor(themeAccent());canvas.setCursor(24,7);canvas.print("SOUND-CHOMP");
   drawTeeth(7,5);
   int batteryX=w-22;
   canvas.drawRect(batteryX,7,15,8,themeAccent());
@@ -307,7 +323,7 @@ void drawHeader(const char* title){
   canvas.fillRect(batteryX+2,9,constrain((int(batteryPct)*11)/100,0,11),4,batteryPct<20?palette().warning:themeAccent());
   // Portrait title needs the entire width; omit battery percentage there.
   if(canvas.width()>canvas.height()){
-    canvas.setTextColor(themeAccent(),PANEL);canvas.setCursor(batteryX-31,7);
+    canvas.setTextColor(themeAccent());canvas.setCursor(batteryX-31,7);
     canvas.printf("%u%%",unsigned(batteryPct));
   }
   // Charging shown by percentage/status; avoid an orphan contrasting pixel within the fill.
@@ -419,7 +435,7 @@ void drawWaveform(int left,int top,int width,int height){
   const int cy=top+height/2;
   canvas.drawFastHLine(left,cy,width,TRIM);
   if(captured==0){
-    canvas.setTextSize(1);canvas.setTextColor(MUTED,PANEL);
+    canvas.setTextSize(1);canvas.setTextColor(MUTED);
     const char* prompt="TAP A: PLAY  HOLD A: REC";
     canvas.setCursor(left+max(2,(width-int(strlen(prompt))*6)/2),cy-4);
     canvas.print(prompt);return;
@@ -571,7 +587,7 @@ void drawChomp(){
     // Shorter visualizer with its bottom kept clear of the centered timer.
     const int left=8,top=103,vw=w-16,vh=58;
     canvas.drawRect(left-2,top-3,vw+4,vh+6,TRIM);
-    canvas.fillRect(left,top,vw,vh,PANEL);
+    // Keep the skin's visualizer-panel background visible through the waveform.
     if(state==State::Playing||state==State::Recording)drawSpectrum(left,top,vw,vh);
     else drawWaveform(left,top,vw,vh);
   }else{
@@ -589,7 +605,7 @@ void drawChomp(){
     drawTapeReels(w);
     const int left=8,top=65,vw=w-16,vh=max(12,h-103);
     canvas.drawRect(left-2,top-3,vw+4,vh+6,TRIM);
-    canvas.fillRect(left,top,vw,vh,PANEL);
+    // Keep the skin's visualizer-panel background visible through the waveform.
     if(state==State::Playing||state==State::Recording)drawSpectrum(left,top,vw,vh);
     else drawWaveform(left,top,vw,vh);
   }
@@ -647,23 +663,36 @@ void drawTracks(){
 }
 void drawSettings(){
   int w=canvas.width(),h=canvas.height();
-  const char* labels[]={"VOLUME","BRIGHT","REVERSE MAP","AUTO PLAY","RESET SPEED","ORIENTATION","THEME"};
-  const char* shortLabels[]={"VOL","BRGT","REV","AUTO","RESET","ORIENT","THEME"};
-  for(int i=0;i<7;i++){
-    int y=19+i*14;bool sel=settingsSelection==i;
+  const char* labels[]={"VOLUME","BRIGHT","REVERSE MAP","AUTO PLAY","RESET SPEED","ORIENTATION","THEME","SKIN"};
+  const char* shortLabels[]={"VOL","BRGT","REV","AUTO","RESET","ORIENT","THEME","SKIN"};
+  const int visible=h>w?8:7;
+  const int scrollTop=constrain(settingsSelection-visible+1,0,8-visible);
+  // Reserve a slim right-hand gutter so additional settings are discoverable.
+  const int gutterX=w-6;
+  const int itemWidth=w-20;
+  for(int i=scrollTop;i<min(8,scrollTop+visible);i++){
+    int y=19+(i-scrollTop)*(h>w?14:12);bool sel=settingsSelection==i;
     uint16_t surface=PANEL;
-    canvas.fillRect(7,y,w-14,14,surface);
-    canvas.drawRect(7,y,w-14,14,sel?(settingsEditing?palette().active:themeAccent()):TRIM);
+    canvas.fillRect(7,y,itemWidth,14,surface);
+    canvas.drawRect(7,y,itemWidth,14,sel?(settingsEditing?palette().active:themeAccent()):TRIM);
     canvas.setTextColor(sel?themeAccent():WHITE,surface);canvas.setTextSize(1);
     canvas.setCursor(13,y+3);canvas.print(h>w?shortLabels[i]:labels[i]);
-    canvas.setCursor(w-(h>w?52:75),y+3);
+    canvas.setCursor(w-(h>w?54:77),y+3);
     if(i==0)canvas.printf("%u%%",unsigned(volumePct));
     else if(i==1)canvas.printf("%u%%",unsigned(brightnessPct));
     else if(i==2)canvas.print(invertedReverse?"INVERTED":"NORMAL");
     else if(i==3)canvas.print(autoPlay?"ON":"OFF");
     else if(i==4)canvas.print(resetSpeedAfterRecord?"ON":"OFF");
     else if(i==5)canvas.print(orientationMode==OrientationMode::Landscape?"LAND":orientationMode==OrientationMode::Portrait?"VERT":"AUTO");
-    else canvas.print(palette().name);
+    else if(i==6)canvas.print(palette().name);
+    else if(i==7)canvas.print(skinSelection==1?"MINIMAL":skinSelection==2?"ARCADE":"CLASSIC");
+  }
+  if(8>visible){
+    const int firstY=19, trackH=visible*(h>w?14:12);
+    canvas.drawFastVLine(gutterX,firstY,trackH,TRIM);
+    const int thumbH=max(9,trackH*visible/8);
+    const int thumbY=firstY+(trackH-thumbH)*scrollTop/(8-visible);
+    canvas.fillRoundRect(gutterX-1,thumbY,3,thumbH,1,themeAccent());
   }
   canvas.setTextColor(WHITE,BG);canvas.setCursor(7,h-14);
   canvas.print(settingsEditing?"TURN:CHANGE CLICK:DONE":"TURN:SELECT CLICK:EDIT");
@@ -752,11 +781,11 @@ void draw(bool force=false){
     if(canvas.width()>canvas.height()){
       const uint16_t* bg=themeSelection==1?ChompArt::kRetroLandscapeRed:
                          themeSelection==2?ChompArt::kRetroLandscapeBlue:ChompArt::kRetroLandscapeGreen;
-      canvas.pushImage(0,0,240,135,bg);
+      canvas.pushImage(0,0,240,135,skinBackground(false)?skinBackground(false):bg);
     }else{
       const uint16_t* bg=themeSelection==1?ChompArt::kRetroPortraitRed:
                          themeSelection==2?ChompArt::kRetroPortraitBlue:ChompArt::kRetroPortraitGreen;
-      canvas.pushImage(0,0,135,240,bg);
+      canvas.pushImage(0,0,135,240,skinBackground(true)?skinBackground(true):bg);
     }
   }else canvas.fillSprite(BG);
   drawHeader(page==Page::Home?"SOUND-CHOMP":page==Page::Chomp?"CHOMP / PLAYER":page==Page::Tracks?"TRACKS":page==Page::Effects?"EFFECTS":page==Page::HowTo?"HOW TO":page==Page::About?"ABOUT":page==Page::Charge?"CHARGE":"SETTINGS");
@@ -824,7 +853,8 @@ void handleWheel(int delta){
       else if(settingsSelection==4 && delta!=0)resetSpeedAfterRecord=delta>0;
       else if(settingsSelection==5 && delta!=0)orientationMode=static_cast<OrientationMode>(constrain(int(orientationMode)+(delta>0?1:-1),0,2));
       else if(settingsSelection==6 && delta!=0)themeSelection=uint8_t(constrain(int(themeSelection)+delta,0,2));
-    }else settingsSelection=constrain(settingsSelection+delta,0,6);
+      else if(settingsSelection==7 && delta!=0){skinSelection=uint8_t(constrain(int(skinSelection)+delta,0,2));prefs.putUChar("skin",skinSelection);}
+    }else settingsSelection=constrain(settingsSelection+delta,0,7);
   }
 }
 void updateScroll(){
@@ -852,7 +882,7 @@ void updateScroll(){
 }
 void service(){M5.update();updateScroll();}
 void clearEvents(){scrollShort=false;scrollLong=false;}
-void saveSettings(){prefs.putUChar("volume",volumePct);prefs.putUChar("bright",brightnessPct);prefs.putBool("revInvert",invertedReverse);prefs.putBool("autoPlay",autoPlay);prefs.putBool("resetSpd",resetSpeedAfterRecord);prefs.putUChar("orientation",uint8_t(orientationMode));prefs.putUChar("theme",themeSelection);}
+void saveSettings(){prefs.putUChar("volume",volumePct);prefs.putUChar("bright",brightnessPct);prefs.putBool("revInvert",invertedReverse);prefs.putBool("autoPlay",autoPlay);prefs.putBool("resetSpd",resetSpeedAfterRecord);prefs.putUChar("orientation",uint8_t(orientationMode));prefs.putUChar("theme",themeSelection);prefs.putUChar("skin",skinSelection);}
 void saveEchoSettings(){
   prefs.putBool("echoOn",echoEnabled);prefs.putUChar("echoWet",echoWet);prefs.putUShort("echoDelay",echoDelayMs);
   prefs.putBool("stutOn",stutterEnabled);prefs.putUShort("stutMs",stutterSliceMs);
@@ -1099,12 +1129,15 @@ void setup(){
   Serial.begin(115200);M5.begin(M5.config());M5.Display.setRotation(1);displayRotation=1;orientationCandidate=1;
   M5.Power.setExtOutput(true);Wire.begin(kGroveSda,kGroveScl);Wire.setClock(100000);
   prefs.begin("soundchomp",false);
+  // Drop the obsolete USB-mode flag if an earlier prototype left it set.
+  if(prefs.getBool("usbDrive",false))prefs.putBool("usbDrive",false);
   volumePct=uint8_t(constrain(int(prefs.getUChar("volume",65)),0,100));
   brightnessPct=uint8_t(constrain(int(prefs.getUChar("bright",80)),5,100));
   invertedReverse=prefs.getBool("revInvert",false);autoPlay=prefs.getBool("autoPlay",false);
   resetSpeedAfterRecord=prefs.getBool("resetSpd",true);
   orientationMode=static_cast<OrientationMode>(constrain(int(prefs.getUChar("orientation",0)),0,2));
   themeSelection=uint8_t(constrain(int(prefs.getUChar("theme",0)),0,2));
+  skinSelection=uint8_t(constrain(int(prefs.getUChar("skin",0)),0,2));
   echoEnabled=prefs.getBool("echoOn",false);
   echoWet=uint8_t(constrain(int(prefs.getUChar("echoWet",35)),0,100));
   echoDelayMs=uint16_t(constrain(int(prefs.getUShort("echoDelay",250)),kEchoMinMs,kEchoMaxMs));
@@ -1137,7 +1170,7 @@ void setup(){
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateWaveform();updateBattery();
-  Serial.println("Sound-Chomp Phase 5F.2 - portrait player alignment");splash();draw(true);
+  Serial.println("Sound-Chomp Phase 5H.2 - built-in skins");splash();draw(true);
 }
 void loop(){
   service();
@@ -1187,7 +1220,10 @@ void loop(){
       }
     }
   }else if(page==Page::Settings){
-    if(M5.BtnA.wasPressed()||scrollShort){scrollShort=false;settingsEditing=!settingsEditing;if(!settingsEditing)saveSettings();}
+    if(M5.BtnA.wasPressed()||scrollShort){
+      scrollShort=false;
+      settingsEditing=!settingsEditing;if(!settingsEditing)saveSettings();
+    }
     scrollLong=false;
   }else if(page==Page::Charge){
     if(M5.BtnA.wasPressed()||scrollShort){scrollShort=false;chargeLastInteraction=millis();if(chargeScreenOff){chargeScreenOff=false;M5.Display.setBrightness(uint8_t(int(brightnessPct)*255/100));draw(true);}}

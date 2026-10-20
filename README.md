@@ -1,3 +1,5 @@
+> **Phase 5H.2:** Select CLASSIC, MINIMAL, or ARCADE under Settings → SKIN. USB user skin uploads are deferred. See [built-in skin instructions](docs/phase5h2-built-in-skins.md).
+
 > **Phase 5E development candidate:** Non-destructive FX-2 Stutter and FX-3 Robot, plus an audible FX-1 Echo tail after one-shot playback. See [Phase 5E tests](docs/phase5e-audio-effects.md). Not yet physically verified.
 
 > Phase 5B.1 experimental UI update: see [docs/phase5b1-ui-controls.md](docs/phase5b1-ui-controls.md).
@@ -106,3 +108,7 @@ Edit the source PNG at `assets/ui/sound_chomp_spritesheet.png`; keep the crop re
 The bundled skin atlas is now compact (244x383) and has 44 editable sprites. The Sound-Chomp teeth logo is deliberately stored in `include/branding.h` rather than in the atlas; it still follows the primary theme color. Builds **automatically validate** the magenta guide frames and regenerate firmware image assets. For optional deterministic repacking of the PNG + JSON, use `python tools/pack_spritesheet.py` (requires Pillow). See `docs/phase5f-skin-foundations.md`.
 
 `skins/examples/skin.json` specifies an early proposal for a future skin package; **USB transfers and runtime custom-skin loading do not exist yet**.
+
+
+## Phase 5H: drag-and-drop USB skins
+See `docs/phase5h-usb-skins.md`. No PySerial: choose USB SKINS in Settings, copy USER.SKN to the temporary drive, eject, then press A.
