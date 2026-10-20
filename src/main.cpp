@@ -1,4 +1,4 @@
-// Sound-Chomp Phase 5F.1: portrait alignment, FX feedback, audio-start mitigation.
+// Sound-Chomp Phase 5F.2: portrait reel, visualizer and centered status polish.
 // SPDX-License-Identifier: MIT
 #include <Arduino.h>
 #include <M5Unified.h>
@@ -345,7 +345,7 @@ void drawTapeReels(int w){
   // Both cassette hubs turn counter-clockwise in forward play, clockwise in
   // reverse. Colored tape rings transfer from left/supply to right/take-up.
   const bool portrait=canvas.height()>canvas.width();
-  const int cy=portrait?75:41;
+  const int cy=portrait?76:41;
   const int centers[2]={portrait?w/2-21:w-66,portrait?w/2+21:w-27};
   const uint32_t now=millis();
   float transport=state==State::Recording?1.0f:(state==State::Playing?speed():0.0f);
@@ -526,17 +526,22 @@ void drawCompactStatus(int areaLeft,int areaWidth,int y,bool center){
 
 // Compact detail line shared by both orientations. Keep labels human-readable
 // and within the 135px portrait viewport (single row, no automatic wrapping).
-void drawPlayerEditStatus(int x,int y){
-  canvas.setTextSize(1);canvas.setTextColor(WHITE);
-  canvas.setCursor(x,y);
+void drawPlayerEditStatus(int x,int y,bool center=false){
+  // Format first, then center the entire detail string on portrait screens.
+  // This shares one value source across both orientations and avoids wrapping.
+  char label[48]={0};
   switch(playerFocus){
-    case PlayerFocus::Speed:canvas.printf("SPEED %+.1fx",double(speed()));break;
-    case PlayerFocus::EchoToggle:canvas.printf("ECHO %s %ums",echoEnabled?"ON":"OFF",unsigned(echoDelayMs));break;
-    case PlayerFocus::Stutter:canvas.printf("STUTTER %s %ums",stutterEnabled?"ON":"OFF",unsigned(stutterSliceMs));break;
-    case PlayerFocus::Robot:canvas.printf("ROBOT %s %u%%",robotEnabled?"ON":"OFF",unsigned(robotIntensity));break;
-    case PlayerFocus::Loop:canvas.printf("LOOP %s",loopMode==LoopMode::Off?"OFF":loopMode==LoopMode::One?"1":"ALL");break;
-    default:drawCompactStatus(x,canvas.width()-2*x,y,canvas.height()>canvas.width());break;
+    case PlayerFocus::Speed:snprintf(label,sizeof(label),"SPEED %+.1fx",double(speed()));break;
+    case PlayerFocus::EchoToggle:snprintf(label,sizeof(label),"ECHO %s %ums",echoEnabled?"ON":"OFF",unsigned(echoDelayMs));break;
+    case PlayerFocus::Stutter:snprintf(label,sizeof(label),"STUTTER %s %ums",stutterEnabled?"ON":"OFF",unsigned(stutterSliceMs));break;
+    case PlayerFocus::Robot:snprintf(label,sizeof(label),"ROBOT %s %u%%",robotEnabled?"ON":"OFF",unsigned(robotIntensity));break;
+    case PlayerFocus::Loop:snprintf(label,sizeof(label),"LOOP %s",loopMode==LoopMode::Off?"OFF":loopMode==LoopMode::One?"1":"ALL");break;
+    default:drawCompactStatus(center?0:x,canvas.width()-(center?0:2*x),y,center);return;
   }
+  canvas.setTextSize(1);canvas.setTextColor(WHITE);
+  const int tw=canvas.textWidth(label);
+  const int tx=center?max(0,(canvas.width()-tw)/2):x;
+  canvas.setCursor(tx,y);canvas.print(label);
 }
 
 void drawChomp(){
@@ -558,13 +563,13 @@ void drawChomp(){
       canvas.setTextSize(2);canvas.setTextColor(accent());
       const int titleX=(w-canvas.textWidth(heading))/2;
       canvas.setCursor(titleX,28);canvas.print(heading);
-      if(playerEditing)drawPlayerEditStatus(5,50);
+      if(playerEditing)drawPlayerEditStatus(5,50,true);
       else drawCompactStatus(4,w-8,50,true);
     }
     // Reels lowered for vertical arrangement, using existing art function.
     drawTapeReels(w);
     // Shorter visualizer with its bottom kept clear of the centered timer.
-    const int left=8,top=99,vw=w-16,vh=62;
+    const int left=8,top=103,vw=w-16,vh=58;
     canvas.drawRect(left-2,top-3,vw+4,vh+6,TRIM);
     canvas.fillRect(left,top,vw,vh,PANEL);
     if(state==State::Playing||state==State::Recording)drawSpectrum(left,top,vw,vh);
@@ -1132,7 +1137,7 @@ void setup(){
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();setStateLed();updateWaveform();updateBattery();
-  Serial.println("Sound-Chomp Phase 5F.1 - portrait UI and startup audio mitigation");splash();draw(true);
+  Serial.println("Sound-Chomp Phase 5F.2 - portrait player alignment");splash();draw(true);
 }
 void loop(){
   service();

@@ -1,3 +1,10 @@
+## Phase 5F.2 — Portrait layout refinement
+
+- Lower portrait reels by 1px without modifying landscape reel positioning.
+- Shorten portrait visualizer by 4px (62px to 58px) and move it down 4px (y=99 to y=103), retaining the same bottom edge to preserve timer/button spacing.
+- Horizontally center portrait edit-detail status strings beneath READY/PLAYING using measured text width. Normal direction/track/effect status remains centered.
+- Preserve Phase 5F.1 audio-start mitigation, themes, sprites, effects, and recording format.
+
 ## Unreleased — Phase 5E (experimental)
 
 - Added FX-2 Stutter and FX-3 Robot as non-destructive playback effects.
