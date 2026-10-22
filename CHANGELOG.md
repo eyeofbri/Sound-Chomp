@@ -1,3 +1,10 @@
+## Phase 5J (development)
+- Introduce track-list actions, on-device 10-character display-name editing and safe hold-to-delete modal.
+- Persist names in NVS Preferences separately from LittleFS audio files.
+- Add filled palette heading on non-player menu pages and consistent action focus.
+- Keep storage at four slots pending a safe six-track migration.
+- Hardware compilation and device tests still required.
+
 ## Phase 5I.1 — UI & Controls Polish (development)
 
 See `PHASE_5I1_NOTES.md` for source-level changes and hardware test checklist.
