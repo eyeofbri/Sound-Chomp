@@ -1,3 +1,10 @@
+## Phase 5I — Configurable FX slots (development)
+
+- Six FX library entries with one-to-one assignment to three player slots; UNUSED support and displacement.
+- New non-destructive Warble, Bitcrush, Telephone effects.
+- Scrollable Effects menu, retained player effect editing, and persistent assignments.
+- Built on 5H.6 artwork and green-shade background recoloring.
+
 ## Phase 5H.6 — Background color rollback
 
 - Restore proven green-dominant background recoloring for all three built-in skins.

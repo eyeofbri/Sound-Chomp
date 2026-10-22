@@ -43,6 +43,26 @@ int16_t* stutterHistory=nullptr;
 size_t stutterPos=0, stutterFilled=0;
 uint32_t effectSampleClock=0;
 constexpr const char* kFirmwareVersion="v0.8.0-dev";
+// Fixed library, user-assignable FX slots (0=UNUSED, 1..3=player buttons).
+enum EffectId:uint8_t {FxEcho=0,FxStutter,FxRobot,FxWarble,FxBitcrush,FxTelephone,FxCount};
+constexpr const char* kEffectNames[FxCount]={"ECHO","STUTTER","ROBOT","WARBLE","BITCRUSH","TELEPHONE"};
+uint8_t effectSlot[FxCount]={1,2,3,0,0,0};
+bool effectOn[FxCount]={false,false,false,false,false,false};
+uint8_t warbleDepth=20,warbleRate=4,crushBits=6,crushHold=3,telephoneStrength=65;
+float warblePhase=0.0f, phoneLow=0.0f, phoneDc=0.0f;
+int16_t crushSample=0;
+uint8_t crushClock=0;
+int effectForSlot(int slot){for(int i=0;i<FxCount;i++)if(effectSlot[i]==slot)return i;return -1;}
+bool activeEffect(int effect){return effect>=0&&effect<FxCount&&effectSlot[effect]!=0&&effectOn[effect];}
+void setEffectSlot(int effect,int newSlot){
+  if(effect<0||effect>=FxCount||newSlot<0||newSlot>3)return;
+  // Assignment is one-to-one: the displaced effect is UNUSED and OFF.
+  if(newSlot){int displaced=effectForSlot(newSlot);if(displaced>=0&&displaced!=effect){effectSlot[displaced]=0;effectOn[displaced]=false;}}
+  effectSlot[effect]=newSlot;
+  if(!newSlot)effectOn[effect]=false;
+}
+const char* slotLabel(int slot){switch(slot){case 1:return "SLOT: 1";case 2:return "SLOT: 2";case 3:return "SLOT: 3";default:return "UNUSED";}}
+
 enum class PlayerFocus:uint8_t{Play=0,Speed=1,EchoToggle=2,Stutter=3,Robot=4,Loop=5};
 PlayerFocus playerFocus=PlayerFocus::Play;
 bool playerEditing=false; // Green selection -> amber adjustment
@@ -52,10 +72,19 @@ uint8_t displayRotation=1;
 uint8_t portraitRotation=0;
 uint32_t lastOrientationPoll=0, orientationStableAt=0;
 uint8_t orientationCandidate=1;
-uint8_t effectsField=0; // 0=enabled,1=mix,2=delay
-void advancePlayerFocus(){playerFocus=static_cast<PlayerFocus>((static_cast<int>(playerFocus)+1)%6);}
+uint8_t effectsField=0; // 0=slot, 1... effect-specific parameters
+int focusSlot(PlayerFocus f){int index=int(f);return (index>=2&&index<=4)?index-1:0;}
+PlayerFocus nextVisibleFocus(PlayerFocus focus,int direction){
+  int idx=int(focus);
+  for(int tries=0;tries<6;tries++){
+    idx=(idx+(direction>=0?1:5))%6;
+    if(idx<2||idx==5||effectForSlot(idx-1)>=0)return static_cast<PlayerFocus>(idx);
+  }
+  return PlayerFocus::Play;
+}
+void advancePlayerFocus(){playerFocus=nextVisibleFocus(playerFocus,1);}
 
-int effectsSelection=0; // Echo, Stutter, Robot
+int effectsSelection=0; // Scrollable list of all library effects
 bool effectsEditing=false;
 bool effectPreferenceDirty=false;
 uint32_t effectPreferenceChangedAt=0;
@@ -65,7 +94,7 @@ int16_t applyEcho(int16_t dry){
   const size_t readIndex=(echoHead+kEchoBufferSamples-delaySamples)%kEchoBufferSamples;
   // Delay-line feedback is deliberately low to avoid runaway echoes.
   const int32_t delayed=echoHistory[readIndex];
-  const int32_t wet=echoEnabled?int32_t(echoWet):0;
+  const int32_t wet=activeEffect(FxEcho)?int32_t(echoWet):0;
   const int32_t mixed=int32_t(dry)+(delayed*wet)/100;
   const int32_t feedback=int32_t(dry)+(delayed*35)/100;
   echoHistory[echoHead]=int16_t(constrain(feedback,-32768,32767));
@@ -75,23 +104,38 @@ int16_t applyEcho(int16_t dry){
 void resetEchoHistory(){if(echoHistory)memset(echoHistory,0,kEchoBufferSamples*sizeof(int16_t));echoHead=0;}
 void resetPlaybackEffects(){
   resetEchoHistory();
-  stutterPos=stutterFilled=0;effectSampleClock=0;robotPhase=0;
+  stutterPos=stutterFilled=0;effectSampleClock=0;robotPhase=0;warblePhase=0;phoneLow=phoneDc=0;crushClock=0;crushSample=0;
   if(stutterHistory)memset(stutterHistory,0,kStutterCapacity*sizeof(int16_t));
 }
 int16_t applyLiveEffects(int16_t dry){
   // Repeating grain: capture one original slice, then replay that slice
   // rather than advancing an entire track while the effect is engaged.
-  if(stutterEnabled && stutterHistory){
+  if(activeEffect(FxStutter) && stutterHistory){
     const size_t slice=constrain(size_t(stutterSliceMs)*kSampleRate/1000,size_t(1),kStutterCapacity);
     if(stutterFilled<slice)stutterHistory[stutterFilled++]=dry;
     if(stutterFilled==slice){dry=stutterHistory[stutterPos%slice];stutterPos=(stutterPos+1)%slice;}
   }else {stutterFilled=0;stutterPos=0;}
   // Robot voice: 55Hz square-wave amplitude modulation with dry/wet mix.
-  if(robotEnabled){
+  if(activeEffect(FxRobot)){
     const int gain=((robotPhase / (kSampleRate/(2*kRobotHz)))&1u)?-1:1;
     robotPhase=(robotPhase+1)%(kSampleRate/(kRobotHz)*2);
     const int32_t robot=int32_t(dry)*gain;
     dry=int16_t(constrain((int32_t(dry)*(100-robotIntensity)+robot*robotIntensity)/100,-32768,32767));
+  }
+  if(activeEffect(FxBitcrush)){
+    // Bit-depth quantization + adjustable sample-and-hold, no saved PCM edits.
+    if(crushClock++>=crushHold){crushClock=0;const int shift=16-int(crushBits);crushSample=int16_t((int32_t(dry)>>shift)<<shift);}
+    dry=crushSample;
+  }else crushClock=0;
+  if(activeEffect(FxTelephone)){
+    // One-pole high pass followed by low pass, progressively narrow bandwidth.
+    const float input=float(dry);
+    const float hpCoef=0.008f+float(telephoneStrength)*0.0015f;
+    phoneDc+=(input-phoneDc)*hpCoef;
+    const float hp=input-phoneDc;
+    const float lpCoef=0.34f-float(telephoneStrength)*0.0027f;
+    phoneLow+=(hp-phoneLow)*max(0.04f,lpCoef);
+    dry=int16_t(constrain(int32_t(phoneLow),-32768,32767));
   }
   ++effectSampleClock;
   return applyEcho(dry);
@@ -475,6 +519,7 @@ void drawTransportButtons(int w,int h){
   for(int i=0;i<6;i++){
     const int col=i%columns,row=i/columns;
     const int x=x0+col*(bw+gap),y=y0+row*(bh+gap);
+    if(i>=2&&i<=4&&effectForSlot(i-1)<0)continue; // Leave blank; no reflow.
     const bool selected=int(playerFocus)==i;
     const uint16_t border=selected?(playerEditing?palette().active:themeAccent()):TRIM;
     const uint16_t c=selected?themeAccent():WHITE;
@@ -497,10 +542,14 @@ void drawTransportButtons(int w,int h){
       canvas.setTextColor(c);canvas.setTextSize(1);
       canvas.setCursor(cx-int(strlen(sp))*3,y+17);canvas.print(sp);
     }else if(i>=2&&i<=4){
+      // Atlas FX frames remain positional; assigned effect is shown by its slot.
       const ChompArt::Sprite& fx=i==2?ChompArt::IconFx1Echo:i==3?ChompArt::IconFx2Stutter:ChompArt::IconFx3Robot;
-      drawAtlasSprite(fx,cx-fx.w/2,y+7,c);
-      if((i==3&&stutterEnabled)||(i==4&&robotEnabled))canvas.fillRect(x+3,y+3,3,3,palette().active);
-      if(i==2&&echoEnabled)canvas.fillRect(x+3,y+3,3,3,palette().active);
+      drawAtlasSprite(fx,cx-fx.w/2,y+5,c);
+      const int effect=effectForSlot(i-1);
+      canvas.setTextColor(c);canvas.setTextSize(1);
+      const char* shortName=effect==FxEcho?"ECH":effect==FxStutter?"STU":effect==FxRobot?"ROB":effect==FxWarble?"WAR":effect==FxBitcrush?"BIT":"TEL";
+      canvas.setCursor(cx-9,y+17);canvas.print(shortName);
+      if(effect>=0&&effectOn[effect])canvas.fillRect(x+3,y+3,3,3,palette().active);
     }else{
       const ChompArt::Sprite& li=loopMode==LoopMode::Off?ChompArt::IconLoopOff:(loopMode==LoopMode::One?ChompArt::IconLoopOne:ChompArt::IconLoopAll);
       drawAtlasSprite(li,cx-8,y+4,c);
@@ -527,12 +576,26 @@ void drawTransportButtons(int w,int h){
 void drawCompactStatus(int areaLeft,int areaWidth,int y,bool center){
   char text[50];
   int used=snprintf(text,sizeof(text),"TRK:%d",activeTrack+1);
-  if(echoEnabled && used>=0 && used<int(sizeof(text)))used+=snprintf(text+used,sizeof(text)-used," E1");
-  if(stutterEnabled && used>=0 && used<int(sizeof(text)))used+=snprintf(text+used,sizeof(text)-used," E2");
-  if(robotEnabled && used>=0 && used<int(sizeof(text)))used+=snprintf(text+used,sizeof(text)-used," E3");
+  for(int slot=1;slot<=3;slot++){
+    const int fx=effectForSlot(slot);
+    if(fx>=0&&effectOn[fx]&&used>=0&&used<int(sizeof(text)))
+      used+=snprintf(text+used,sizeof(text)-used," E%d",slot);
+  }
   if(loopMode!=LoopMode::Off && used>=0 && used<int(sizeof(text)))
     snprintf(text+used,sizeof(text)-used," %s",loopMode==LoopMode::One?"L1":"ALL");
   canvas.setTextSize(1);
+  // The 135px portrait display cannot fit the landscape-length status.
+  // Use a deliberately compact all-states indicator instead of clipping.
+  if(center && areaWidth<160){
+    int end=snprintf(text,sizeof(text),"T%d",activeTrack+1);
+    for(int slot=1;slot<=3;slot++){
+      const int fx=effectForSlot(slot);
+      if(fx>=0&&effectOn[fx]&&end<int(sizeof(text)))
+        end+=snprintf(text+end,sizeof(text)-end," %d",slot);
+    }
+    if(loopMode!=LoopMode::Off&&end<int(sizeof(text)))
+      snprintf(text+end,sizeof(text)-end," %s",loopMode==LoopMode::One?"L1":"ALL");
+  }
   const int fullWidth=19+5+int(strlen(text))*6;
   int x=center?areaLeft+(areaWidth-fullWidth)/2:areaLeft;
   x=max(areaLeft,x);
@@ -549,9 +612,19 @@ void drawPlayerEditStatus(int x,int y,bool center=false){
   char label[48]={0};
   switch(playerFocus){
     case PlayerFocus::Speed:snprintf(label,sizeof(label),"SPEED %+.1fx",double(speed()));break;
-    case PlayerFocus::EchoToggle:snprintf(label,sizeof(label),"ECHO %s %ums",echoEnabled?"ON":"OFF",unsigned(echoDelayMs));break;
-    case PlayerFocus::Stutter:snprintf(label,sizeof(label),"STUTTER %s %ums",stutterEnabled?"ON":"OFF",unsigned(stutterSliceMs));break;
-    case PlayerFocus::Robot:snprintf(label,sizeof(label),"ROBOT %s %u%%",robotEnabled?"ON":"OFF",unsigned(robotIntensity));break;
+    case PlayerFocus::EchoToggle:
+    case PlayerFocus::Stutter:
+    case PlayerFocus::Robot:{
+      int fx=effectForSlot(focusSlot(playerFocus));
+      if(fx<0)snprintf(label,sizeof(label),"FX UNUSED");
+      else if(fx==FxEcho)snprintf(label,sizeof(label),"ECHO %s %ums",effectOn[fx]?"ON":"OFF",unsigned(echoDelayMs));
+      else if(fx==FxStutter)snprintf(label,sizeof(label),"STUTTER %s %ums",effectOn[fx]?"ON":"OFF",unsigned(stutterSliceMs));
+      else if(fx==FxRobot)snprintf(label,sizeof(label),"ROBOT %s %u%%",effectOn[fx]?"ON":"OFF",unsigned(robotIntensity));
+      else if(fx==FxWarble)snprintf(label,sizeof(label),"WARBLE %s %u%%",effectOn[fx]?"ON":"OFF",unsigned(warbleDepth));
+      else if(fx==FxBitcrush)snprintf(label,sizeof(label),"BITCRUSH %s %uB",effectOn[fx]?"ON":"OFF",unsigned(crushBits));
+      else snprintf(label,sizeof(label),"PHONE %s %u%%",effectOn[fx]?"ON":"OFF",unsigned(telephoneStrength));
+      break;
+    }
     case PlayerFocus::Loop:snprintf(label,sizeof(label),"LOOP %s",loopMode==LoopMode::Off?"OFF":loopMode==LoopMode::One?"1":"ALL");break;
     default:drawCompactStatus(center?0:x,canvas.width()-(center?0:2*x),y,center);return;
   }
@@ -730,46 +803,41 @@ void drawCharge(){
   canvas.setCursor((w-int(strlen(buf))*12)/2,101);canvas.print(buf);
   if(charging){canvas.setTextSize(1);canvas.setCursor(92,23);canvas.print("CHARGING");}
 }
+uint8_t effectLastField(int fx){return fx==FxEcho||fx==FxWarble||fx==FxBitcrush?2:1;}
 void drawEffects(){
   const int w=canvas.width(),h=canvas.height();
   const bool portrait=h>w;
-  canvas.setTextSize(1);canvas.setTextColor(themeAccent());
-  canvas.setCursor(7,22);canvas.print("EFFECTS");
-  const int rowY[3]={37,62,87};
-  const char* labels[3]={"ECHO", "STUTTER", "ROBOT"};
-  for(int row=0;row<3;++row){
-    const int y=rowY[row];
+  // Three compact visible rows on landscape; six on portrait.
+  const int visible=portrait?6:3, rowH=portrait?27:25;
+  const int first=max(0,min(effectsSelection-visible/2,FxCount-visible));
+  canvas.setTextSize(1);
+  for(int pos=0;pos<visible;pos++){
+    const int row=first+pos,y=23+pos*rowH;
     const bool focus=effectsSelection==row;
-    canvas.drawRect(5,y,w-10,22,focus?themeAccent():TRIM);
-    canvas.setTextColor(focus?palette().active:WHITE);canvas.setCursor(9,y+7);
-    canvas.print(labels[row]);
-    const bool enabled=row==0?echoEnabled:row==1?stutterEnabled:robotEnabled;
-    // In portrait show one selected row's values in a separate detail line.
-    if(!portrait){
-      const int x=w-132;
-      canvas.setTextColor((focus&&effectsEditing&&effectsField==0)?palette().active:WHITE);
-      canvas.setCursor(x,y+7);canvas.print(enabled?"ON":"OFF");
-      canvas.setTextColor((focus&&effectsEditing&&effectsField==1)?palette().active:WHITE);
-      canvas.setCursor(x+39,y+7);
-      if(row==0)canvas.printf("%u%%",unsigned(echoWet));
-      else if(row==1)canvas.printf("%ums",unsigned(stutterSliceMs));
-      else canvas.printf("%u%%",unsigned(robotIntensity));
-      if(row==0){
-        canvas.setTextColor((focus&&effectsEditing&&effectsField==2)?palette().active:WHITE);
-        canvas.setCursor(x+79,y+7);canvas.printf("%ums",unsigned(echoDelayMs));
-      }
-    }else{
-      canvas.setTextColor(WHITE);canvas.setCursor(w-34,y+7);canvas.print(enabled?"ON":"OFF");
-    }
+    const uint16_t border=focus?themeAccent():TRIM;
+    canvas.drawRect(5,y,w-14,rowH-3,border);
+    canvas.setTextColor(focus?themeAccent():WHITE);
+    canvas.setCursor(9,y+6);canvas.print(kEffectNames[row]);
+    canvas.setTextColor((focus&&effectsEditing&&effectsField==0)?palette().active:WHITE);
+    const char* slot=slotLabel(effectSlot[row]);
+    canvas.setCursor(w-12-int(strlen(slot))*6,y+6);canvas.print(slot);
   }
-  if(portrait){
-    canvas.setTextColor(themeAccent());canvas.setCursor(8,120);
-    if(effectsSelection==0)canvas.printf("MIX %u%%  DEL %ums",unsigned(echoWet),unsigned(echoDelayMs));
-    else if(effectsSelection==1)canvas.printf("SLICE %ums",unsigned(stutterSliceMs));
-    else canvas.printf("LEVEL %u%%",unsigned(robotIntensity));
-  }
-  canvas.setTextColor(MUTED);canvas.setCursor(8,h-13);
-  canvas.print(effectsEditing?"TURN: EDIT CLICK: NEXT":"TURN: SELECT CLICK: EDIT");
+  // Scrollbar, matching the other scrollable settings list.
+  const int sx=w-4,trackY=23,trackH=visible*rowH-3;
+  canvas.drawFastVLine(sx,trackY,trackH,TRIM);
+  const int thumbH=max(12,trackH*visible/FxCount);
+  canvas.fillRect(sx-1,trackY+(trackH-thumbH)*first/max(1,FxCount-visible),3,thumbH,themeAccent());
+  const int detailY=portrait?198:101;
+  const int fx=effectsSelection;
+  canvas.setTextColor(palette().active);canvas.setCursor(7,detailY);
+  if(fx==FxEcho)canvas.printf("MIX %u%% DEL %ums",unsigned(echoWet),unsigned(echoDelayMs));
+  else if(fx==FxStutter)canvas.printf("SLICE %ums",unsigned(stutterSliceMs));
+  else if(fx==FxRobot)canvas.printf("LEVEL %u%%",unsigned(robotIntensity));
+  else if(fx==FxWarble)canvas.printf("RATE %uHz DEP %u%%",unsigned(warbleRate),unsigned(warbleDepth));
+  else if(fx==FxBitcrush)canvas.printf("BITS %u HOLD %u",unsigned(crushBits),unsigned(crushHold));
+  else canvas.printf("FILTER %u%%",unsigned(telephoneStrength));
+  canvas.setTextColor(MUTED);canvas.setCursor(7,h-12);
+  canvas.print(effectsEditing?"TURN: CHANGE CLICK: NEXT":"TURN: SCROLL CLICK: EDIT");
 }
 
 void draw(bool force=false){
@@ -802,7 +870,13 @@ void handleWheel(int delta){
   else if(page==Page::Tracks){trackSelection=constrain(trackSelection+delta,0,kTrackCount-1);trackDeleteConfirm=false;}
   else if(page==Page::Chomp){
     if(!playerEditing){
-      playerFocus=static_cast<PlayerFocus>(constrain(int(playerFocus)+delta,0,5));
+      const int direction=delta>=0?1:-1;
+      for(int step=0;step<abs(delta);step++){
+        const PlayerFocus next=nextVisibleFocus(playerFocus,direction);
+        // Do not wrap when scrolling the transport strip.
+        if((direction>0&&int(next)<=int(playerFocus))||(direction<0&&int(next)>=int(playerFocus)))break;
+        playerFocus=next;
+      }
     }else if(playerFocus==PlayerFocus::Speed){
       const int before=speedIndex;
       speedIndex=constrain(speedIndex+delta,0,kSpeedCount-1);
@@ -810,39 +884,60 @@ void handleWheel(int delta){
         if(speedIndex==before){reelWheelNudge=0;reelWheelNudgeAt=0;limitFlashUntil=millis()+220;}
         else {reelWheelNudge=delta>0?1.7f:-1.7f;reelWheelNudgeAt=millis();tapePosition=constrain(tapePosition+0.035f*float(delta),0.0f,1.0f);}
       }
-    }else if(playerFocus==PlayerFocus::EchoToggle){
-      // Off at zero; forward wheel positions enable echo and set delay.
-      if(delta<0 && echoDelayMs<=kEchoMinMs)echoEnabled=false;
-      else if(delta>0 && !echoEnabled){echoEnabled=true;echoDelayMs=kEchoMinMs;}
-      else if(echoEnabled)echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*25,kEchoMinMs,kEchoMaxMs));
-      markEchoSettingsDirty();
-    }else if(playerFocus==PlayerFocus::Stutter){
-      if(delta<0 && stutterSliceMs<=80)stutterEnabled=false;
-      else if(delta>0 && !stutterEnabled){stutterEnabled=true;stutterSliceMs=80;}
-      else if(stutterEnabled)stutterSliceMs=uint16_t(constrain(int(stutterSliceMs)+delta*20,80,400));
-      markEchoSettingsDirty();
-    }else if(playerFocus==PlayerFocus::Robot){
-      if(delta<0 && robotIntensity<=5)robotEnabled=false;
-      else if(delta>0 && !robotEnabled){robotEnabled=true;robotIntensity=5;}
-      else if(robotEnabled)robotIntensity=uint8_t(constrain(int(robotIntensity)+delta*5,5,100));
-      markEchoSettingsDirty();
+    }else if(focusSlot(playerFocus)){
+      const int fx=effectForSlot(focusSlot(playerFocus));
+      if(fx>=0){
+        // Player remains the ONLY place to enable/disable effects.
+        if(fx==FxEcho){
+          if(delta<0&&echoDelayMs<=kEchoMinMs)effectOn[fx]=false;
+          else if(delta>0&&!effectOn[fx]){effectOn[fx]=true;echoDelayMs=kEchoMinMs;}
+          else if(effectOn[fx])echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*25,kEchoMinMs,kEchoMaxMs));
+        }else if(fx==FxStutter){
+          if(delta<0&&stutterSliceMs<=80)effectOn[fx]=false;
+          else if(delta>0&&!effectOn[fx]){effectOn[fx]=true;stutterSliceMs=80;}
+          else if(effectOn[fx])stutterSliceMs=uint16_t(constrain(int(stutterSliceMs)+delta*20,80,400));
+        }else{
+          // Preserve the original wheel editing style: turning up enables and
+          // increases the main parameter; reaching the minimum and turning
+          // down again disables the assigned effect.
+          int value=fx==FxRobot?int(robotIntensity):fx==FxWarble?int(warbleDepth):
+                    fx==FxBitcrush?int(crushBits):int(telephoneStrength);
+          const int minValue=fx==FxBitcrush?2:0;
+          const int maxValue=fx==FxBitcrush?12:fx==FxWarble?50:100;
+          const int step=fx==FxBitcrush?1:5;
+          if(delta<0&&value<=minValue)effectOn[fx]=false;
+          else if(delta>0&&!effectOn[fx])effectOn[fx]=true;
+          else if(effectOn[fx])value=constrain(value+delta*step,minValue,maxValue);
+          if(fx==FxRobot)robotIntensity=uint8_t(value);
+          else if(fx==FxWarble)warbleDepth=uint8_t(value);
+          else if(fx==FxBitcrush)crushBits=uint8_t(value);
+          else telephoneStrength=uint8_t(value);
+        }
+        echoEnabled=effectOn[FxEcho];stutterEnabled=effectOn[FxStutter];robotEnabled=effectOn[FxRobot];
+        markEchoSettingsDirty();
+      }
     }else if(playerFocus==PlayerFocus::Loop){
       loopMode=static_cast<LoopMode>(constrain(int(loopMode)+delta,0,2));
     }
   }else if(page==Page::Effects){
-    if(!effectsEditing)effectsSelection=constrain(effectsSelection+delta,0,2);
-    else if(effectsSelection==0){
-      if(effectsField==0&&delta)echoEnabled=delta>0;
-      else if(effectsField==1)echoWet=uint8_t(constrain(int(echoWet)+delta*5,0,100));
-      else if(effectsField==2)echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*kEchoStepMs,kEchoMinMs,kEchoMaxMs));
-      markEchoSettingsDirty();
-    }else if(effectsSelection==1){
-      if(effectsField==0&&delta)stutterEnabled=delta>0;
-      else if(effectsField==1)stutterSliceMs=uint16_t(constrain(int(stutterSliceMs)+delta*20,80,400));
-      markEchoSettingsDirty();
-    }else{
-      if(effectsField==0&&delta)robotEnabled=delta>0;
-      else if(effectsField==1)robotIntensity=uint8_t(constrain(int(robotIntensity)+delta*5,0,100));
+    if(!effectsEditing)effectsSelection=constrain(effectsSelection+delta,0,int(FxCount)-1);
+    else {
+      const int fx=effectsSelection;
+      if(effectsField==0){
+        setEffectSlot(fx,constrain(int(effectSlot[fx])+delta,0,3));
+        if(focusSlot(playerFocus)&&effectForSlot(focusSlot(playerFocus))<0){playerFocus=PlayerFocus::Play;playerEditing=false;}
+      }else if(fx==FxEcho){
+        if(effectsField==1)echoWet=uint8_t(constrain(int(echoWet)+delta*5,0,100));
+        else echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*kEchoStepMs,kEchoMinMs,kEchoMaxMs));
+      }else if(fx==FxStutter)stutterSliceMs=uint16_t(constrain(int(stutterSliceMs)+delta*20,80,400));
+      else if(fx==FxRobot)robotIntensity=uint8_t(constrain(int(robotIntensity)+delta*5,0,100));
+      else if(fx==FxWarble){
+        if(effectsField==1)warbleRate=uint8_t(constrain(int(warbleRate)+delta,1,10));
+        else warbleDepth=uint8_t(constrain(int(warbleDepth)+delta*5,0,50));
+      }else if(fx==FxBitcrush){
+        if(effectsField==1)crushBits=uint8_t(constrain(int(crushBits)+delta,2,12));
+        else crushHold=uint8_t(constrain(int(crushHold)+delta,1,12));
+      }else telephoneStrength=uint8_t(constrain(int(telephoneStrength)+delta*5,0,100));
       markEchoSettingsDirty();
     }
   }else if(page==Page::Settings){
@@ -888,6 +983,13 @@ void saveEchoSettings(){
   prefs.putBool("echoOn",echoEnabled);prefs.putUChar("echoWet",echoWet);prefs.putUShort("echoDelay",echoDelayMs);
   prefs.putBool("stutOn",stutterEnabled);prefs.putUShort("stutMs",stutterSliceMs);
   prefs.putBool("robotOn",robotEnabled);prefs.putUChar("robotMix",robotIntensity);
+  for(int fx=0;fx<FxCount;fx++){
+    char key[14];snprintf(key,sizeof(key),"fxSlot%d",fx);prefs.putUChar(key,effectSlot[fx]);
+    snprintf(key,sizeof(key),"fxOn%d",fx);prefs.putBool(key,effectOn[fx]);
+  }
+  prefs.putUChar("warRate",warbleRate);prefs.putUChar("warDepth",warbleDepth);
+  prefs.putUChar("crBits",crushBits);prefs.putUChar("crHold",crushHold);
+  prefs.putUChar("phoneStr",telephoneStrength);
 }
 void backHome(){trackDeleteConfirm=false;aWasDown=false;aHoldStarted=false;if(page==Page::Settings)saveSettings();if(page==Page::Effects)saveEchoSettings();settingsEditing=false;effectsEditing=false;page=Page::Home;clearEvents();draw(true);}
 void openSelection(){
@@ -999,7 +1101,7 @@ void playClip(){
         if(cursor<0 || cursor>=double(captured)){
           if(loopMode==LoopMode::Off){
             sourceExhausted=true;
-            if(echoEnabled && echoWet>0 && echoHistory)
+            if(activeEffect(FxEcho) && echoWet>0 && echoHistory)
               tailSamplesRemaining=min(maxTailSamples,size_t(echoDelayMs)*kSampleRate/1000*5);
             if(tailSamplesRemaining){output[count]=applyEcho(0);--tailSamplesRemaining;continue;}
             break;
@@ -1025,7 +1127,15 @@ void playClip(){
         const float frac=float(cursor-double(left));
         const float v=samples[left]*(1.0f-frac)+samples[right]*frac;
         output[count]=applyLiveEffects(int16_t(constrain(int32_t(v),-32768,32767)));
-        cursor+=double(rate);
+        // Warble changes *playback rate*, yielding actual wavering pitch.
+        // Keep the multiplier positive so reverse and normal playback stay valid.
+        double stepRate=double(rate);
+        if(activeEffect(FxWarble)){
+          stepRate*=1.0+double(warbleDepth)*0.01*sin(double(warblePhase));
+          warblePhase+=6.2831853f*float(warbleRate)/float(kSampleRate);
+          if(warblePhase>6.2831853f)warblePhase-=6.2831853f;
+        }
+        cursor+=stepRate;
         ++samplesSinceBoundary;
       }
       if(count){
@@ -1146,6 +1256,21 @@ void setup(){
   stutterSliceMs=uint16_t(constrain(int(prefs.getUShort("stutMs",180)),80,400));
   robotEnabled=prefs.getBool("robotOn",false);
   robotIntensity=uint8_t(constrain(int(prefs.getUChar("robotMix",65)),0,100));
+  bool occupied[4]={false,false,false,false};
+  for(int fx=0;fx<FxCount;fx++){
+    char key[14];snprintf(key,sizeof(key),"fxSlot%d",fx);
+    const uint8_t saved=prefs.getUChar(key,fx<3?fx+1:0);
+    effectSlot[fx]=(saved<=3&&!occupied[saved])?saved:0;
+    if(effectSlot[fx])occupied[effectSlot[fx]]=true;
+    snprintf(key,sizeof(key),"fxOn%d",fx);
+    effectOn[fx]=effectSlot[fx]&&prefs.getBool(key,fx==FxEcho?echoEnabled:fx==FxStutter?stutterEnabled:fx==FxRobot?robotEnabled:false);
+  }
+  echoEnabled=effectOn[FxEcho];stutterEnabled=effectOn[FxStutter];robotEnabled=effectOn[FxRobot];
+  warbleRate=uint8_t(constrain(int(prefs.getUChar("warRate",4)),1,10));
+  warbleDepth=uint8_t(constrain(int(prefs.getUChar("warDepth",20)),0,50));
+  crushBits=uint8_t(constrain(int(prefs.getUChar("crBits",6)),2,12));
+  crushHold=uint8_t(constrain(int(prefs.getUChar("crHold",3)),1,12));
+  telephoneStrength=uint8_t(constrain(int(prefs.getUChar("phoneStr",65)),0,100));
   M5.Display.setBrightness(uint8_t(int(brightnessPct)*255/100));
   for(auto& t:tracks){
     t.pcm=static_cast<int16_t*>(heap_caps_malloc(kMaxSamples*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
@@ -1163,8 +1288,8 @@ void setup(){
   for(auto& b:playChunks)b=static_cast<int16_t*>(heap_caps_malloc(kPlayChunk*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   echoHistory=static_cast<int16_t*>(heap_caps_calloc(kEchoBufferSamples,sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   stutterHistory=static_cast<int16_t*>(heap_caps_calloc(kStutterCapacity,sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
-  if(!stutterHistory){stutterEnabled=false;Serial.println("Stutter: no PSRAM, effect disabled");}
-  if(!echoHistory){echoEnabled=false;Serial.println("Echo: no PSRAM, effect disabled");}
+  if(!stutterHistory){stutterEnabled=false;effectOn[FxStutter]=false;Serial.println("Stutter: no PSRAM, effect disabled");}
+  if(!echoHistory){echoEnabled=false;effectOn[FxEcho]=false;Serial.println("Echo: no PSRAM, effect disabled");}
   bool audioBuffersReady=true;for(const auto& t:tracks)audioBuffersReady=audioBuffersReady&&(t.pcm!=nullptr);for(auto* b:playChunks)audioBuffersReady=audioBuffersReady&&(b!=nullptr);
   if(!audioBuffersReady){state=State::Error;errorText="PSRAM ALLOCATION FAILED";Serial.println(errorText);}
   canvas.setColorDepth(16);
@@ -1233,7 +1358,7 @@ void loop(){
   }else if(page==Page::Effects){
     if(M5.BtnA.wasPressed()||scrollShort){
       scrollShort=false;
-      const uint8_t lastField=effectsSelection==0?2:1;
+      const uint8_t lastField=effectLastField(effectsSelection);
       if(!effectsEditing){effectsEditing=true;effectsField=0;}
       else if(effectsField<lastField)effectsField++;
       else {effectsEditing=false;saveEchoSettings();}
