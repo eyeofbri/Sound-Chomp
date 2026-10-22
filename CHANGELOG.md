@@ -1,3 +1,7 @@
+## Phase 5I.1 — UI & Controls Polish (development)
+
+See `PHASE_5I1_NOTES.md` for source-level changes and hardware test checklist.
+
 ## Phase 5I — Configurable FX slots (development)
 
 - Six FX library entries with one-to-one assignment to three player slots; UNUSED support and displacement.

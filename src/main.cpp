@@ -42,10 +42,23 @@ constexpr size_t kStutterCapacity=kSampleRate*400/1000;
 int16_t* stutterHistory=nullptr;
 size_t stutterPos=0, stutterFilled=0;
 uint32_t effectSampleClock=0;
-constexpr const char* kFirmwareVersion="v0.8.0-dev";
+constexpr const char* kFirmwareVersion="v0.8.0-dev (5I.1)";
 // Fixed library, user-assignable FX slots (0=UNUSED, 1..3=player buttons).
 enum EffectId:uint8_t {FxEcho=0,FxStutter,FxRobot,FxWarble,FxBitcrush,FxTelephone,FxCount};
 constexpr const char* kEffectNames[FxCount]={"ECHO","STUTTER","ROBOT","WARBLE","BITCRUSH","TELEPHONE"};
+// Highest editable field for each effect: 0=FX assignment, 1/2=parameters.
+uint8_t effectLastField(int effect){
+  switch(effect){
+    case FxEcho:
+    case FxWarble:
+    case FxBitcrush: return 2;
+    case FxStutter:
+    case FxRobot:
+    case FxTelephone: return 1;
+    default: return 0;
+  }
+}
+
 uint8_t effectSlot[FxCount]={1,2,3,0,0,0};
 bool effectOn[FxCount]={false,false,false,false,false,false};
 uint8_t warbleDepth=20,warbleRate=4,crushBits=6,crushHold=3,telephoneStrength=65;
@@ -61,7 +74,7 @@ void setEffectSlot(int effect,int newSlot){
   effectSlot[effect]=newSlot;
   if(!newSlot)effectOn[effect]=false;
 }
-const char* slotLabel(int slot){switch(slot){case 1:return "SLOT: 1";case 2:return "SLOT: 2";case 3:return "SLOT: 3";default:return "UNUSED";}}
+const char* slotLabel(int slot){switch(slot){case 1:return "FX:1";case 2:return "FX:2";case 3:return "FX:3";default:return "--";}}
 
 enum class PlayerFocus:uint8_t{Play=0,Speed=1,EchoToggle=2,Stutter=3,Robot=4,Loop=5};
 PlayerFocus playerFocus=PlayerFocus::Play;
@@ -362,6 +375,7 @@ void drawHeader(const char* title){
   if(page!=Page::Chomp)canvas.fillRect(2,2,w-4,17,PANEL);
   canvas.setTextSize(1);canvas.setTextColor(themeAccent());canvas.setCursor(24,7+headerShift);canvas.print("SOUND-CHOMP");
   drawTeeth(7,5+headerShift);
+  if(page==Page::Charge)return; // Large charging battery replaces the header battery.
   int batteryX=w-22;
   canvas.drawRect(batteryX,7+headerShift,15,8,themeAccent());
   canvas.fillRect(batteryX-3,9+headerShift,3,4,themeAccent()); // battery terminal on left
@@ -459,22 +473,13 @@ void drawLoopIcon(int x,int y){
     else canvas.printf("ALL(%d)",activeTrack+1);
   }
 }
-const ChompArt::Sprite& timerSprite(char c){
- switch(c){
- case '0':return ChompArt::Digit0;case '1':return ChompArt::Digit1;case '2':return ChompArt::Digit2;
- case '3':return ChompArt::Digit3;case '4':return ChompArt::Digit4;case '5':return ChompArt::Digit5;
- case '6':return ChompArt::Digit6;case '7':return ChompArt::Digit7;case '8':return ChompArt::Digit8;
- case '9':return ChompArt::Digit9;case '.':return ChompArt::SymDot;default:return ChompArt::SymS;
- }
-}
-int timeWidth(const char* str){int total=0;for(const char* t=str;*t;++t)total+=timerSprite(*t).w+1;return total?total-1:0;}
+// Clean, background-free runtime timer; avoids opaque pixels in legacy digit sprites.
+int timeWidth(const char* str){return int(strlen(str))*6;}
 void drawTimeLabel(int right,int y,const char* str){
- int x=right-timeWidth(str);
- for(const char* t=str;*t;++t){
-  const auto& glyph=timerSprite(*t);
-  drawAtlasSprite(glyph,x,y+(12-int(glyph.h))/2,state==State::Playing?palette().active:palette().warning);
-  x+=glyph.w+1;
- }
+  canvas.setTextSize(1);
+  canvas.setTextColor(state==State::Playing?palette().active:palette().warning);
+  canvas.setCursor(right-timeWidth(str),y+2);
+  canvas.print(str);
 }
 void drawWaveform(int left,int top,int width,int height){
   const int cy=top+height/2;
@@ -506,6 +511,17 @@ void drawWaveform(int left,int top,int width,int height){
   }
 }
 // A compact two-tier, six-button transport strip; all geometry fits 240x135.
+// Effect artwork comes from six reclaimed (8x12) atlas cells.
+void drawEffectGlyph(int id,int x,int y,uint16_t color){
+  switch(id){
+    case FxEcho:drawAtlasSprite(ChompArt::IconFxEcho,x,y,color);break;
+    case FxStutter:drawAtlasSprite(ChompArt::IconFxStutter,x,y,color);break;
+    case FxRobot:drawAtlasSprite(ChompArt::IconFxRobot,x,y,color);break;
+    case FxWarble:drawAtlasSprite(ChompArt::IconFxWarble,x,y,color);break;
+    case FxBitcrush:drawAtlasSprite(ChompArt::IconFxBitcrush,x,y,color);break;
+    case FxTelephone:drawAtlasSprite(ChompArt::IconFxTelephone,x,y,color);break;
+  }
+}
 void drawTransportButtons(int w,int h){
   const bool portrait=h>w;
   const int columns=portrait?3:6;
@@ -537,18 +553,16 @@ void drawTransportButtons(int w,int h){
       if(state==State::Playing)drawAtlasSprite(ChompArt::IconPause,cx-6,y+6,c);
       else drawAtlasSprite(ChompArt::IconPlay,cx-7,y+6,c);
     }else if(i==1){
-      drawAtlasSprite(ChompArt::IconSpeed,cx-8,y+5,c);
+      drawAtlasSprite(speed()<0?ChompArt::IconReverse:ChompArt::IconForward,cx-8,y+5,c);
       char sp[12];snprintf(sp,sizeof(sp),"%+.1fx",double(speed()));
       canvas.setTextColor(c);canvas.setTextSize(1);
       canvas.setCursor(cx-int(strlen(sp))*3,y+17);canvas.print(sp);
     }else if(i>=2&&i<=4){
-      // Atlas FX frames remain positional; assigned effect is shown by its slot.
-      const ChompArt::Sprite& fx=i==2?ChompArt::IconFx1Echo:i==3?ChompArt::IconFx2Stutter:ChompArt::IconFx3Robot;
-      drawAtlasSprite(fx,cx-fx.w/2,y+5,c);
       const int effect=effectForSlot(i-1);
+      if(effect>=0)drawEffectGlyph(effect,cx-4,y+5,c);
       canvas.setTextColor(c);canvas.setTextSize(1);
-      const char* shortName=effect==FxEcho?"ECH":effect==FxStutter?"STU":effect==FxRobot?"ROB":effect==FxWarble?"WAR":effect==FxBitcrush?"BIT":"TEL";
-      canvas.setCursor(cx-9,y+17);canvas.print(shortName);
+      char slotName[5];snprintf(slotName,sizeof(slotName),"FX%d",i-1);
+      canvas.setCursor(cx-9,y+17);canvas.print(slotName);
       if(effect>=0&&effectOn[effect])canvas.fillRect(x+3,y+3,3,3,palette().active);
     }else{
       const ChompArt::Sprite& li=loopMode==LoopMode::Off?ChompArt::IconLoopOff:(loopMode==LoopMode::One?ChompArt::IconLoopOne:ChompArt::IconLoopAll);
@@ -699,15 +713,17 @@ void drawMenuIcon(int x,int y,int index,uint16_t color){
     default:canvas.drawRect(x+1,y+2,7,5,color);canvas.fillRect(x,y+4,1,2,color);break;
   }
 }
+void drawPageHeading(const char* name,int symbol);
 void drawHome(){
   int w=canvas.width(),h=canvas.height();
   const char* items[]={"CHOMP","TRACKS","EFFECTS","SETTINGS","HOW TO","ABOUT","CHARGE"};
+  drawPageHeading("MENU",-1);
   // Landscape: two columns. Portrait: one readable column.
   const int perColumn=h>w?7:4, gap=5, margin=7;
   const int cw=h>w?w-2*margin:(w-2*margin-gap)/2;
   for(int i=0;i<7;i++){
     int x=margin+(i/perColumn)*(cw+gap);
-    int y=24+(i%perColumn)*(h>w?28:24);
+    int y=39+(i%perColumn)*(h>w?27:23);
     bool selected=i==homeSelection;
     uint16_t surface=PANEL;
     canvas.fillRect(x,y,cw,21,surface);
@@ -717,129 +733,176 @@ void drawHome(){
     canvas.setCursor(x+20,y+7);canvas.print(items[i]);
   }
 }
+// Shared menu title is intentionally below the immutable branding header.
+void drawPageHeading(const char* name,int symbol){
+  const int w=canvas.width(),h=canvas.height();
+  const int y=22;
+  canvas.setTextSize(1);canvas.setTextColor(themeAccent());
+  if(symbol>=0)drawMenuIcon(8,y+2,symbol,themeAccent());
+  canvas.setCursor(symbol>=0?24:8,y+2);canvas.print(name);
+  canvas.drawFastHLine(5,34,w-10,TRIM);
+}
 void drawTracks(){
-  int w=canvas.width(),h=canvas.height();
+  const int w=canvas.width(),h=canvas.height();const bool portrait=h>w;
+  drawPageHeading("TRACKS",1);
   for(int i=0;i<kTrackCount;i++){
-    int y=23+i*22;
-    uint16_t surface=PANEL;
-    canvas.fillRect(7,y,w-14,20,surface);
-    canvas.drawRect(7,y,w-14,20,i==trackSelection?themeAccent():TRIM);
+    const int y=portrait?40+i*36:39+i*20;
+    const int rowH=portrait?32:18;
+    const uint16_t surface=PANEL;
+    canvas.fillRect(5,y,w-10,rowH,surface);
+    canvas.drawRect(5,y,w-10,rowH,i==trackSelection?themeAccent():TRIM);
     canvas.setTextSize(1);canvas.setTextColor(i==trackSelection?themeAccent():WHITE,surface);
-    canvas.setCursor(13,y+6);canvas.printf("%c CHOMP %02d",i==activeTrack?'*':' ',i+1);
-    canvas.setCursor(w-88,y+6);
-    if(tracks[i].length)canvas.printf("%.1fs",double(tracks[i].length)/kSampleRate);
-    else canvas.print("EMPTY");
+    char duration[20];if(tracks[i].length)snprintf(duration,sizeof(duration),"%.1fs",double(tracks[i].length)/kSampleRate);
+    else snprintf(duration,sizeof(duration),"EMPTY");
+    char label[24];snprintf(label,sizeof(label),"%c CHOMP %02d",i==activeTrack?'*':' ',i+1);
+    canvas.setCursor(10,y+(portrait?5:5));canvas.print(label);
+    if(portrait){canvas.setCursor(w-9-int(strlen(duration))*6,y+18);canvas.print(duration);}
+    else{canvas.setCursor(w-9-int(strlen(duration))*6,y+5);canvas.print(duration);}
   }
-  canvas.setTextSize(1);canvas.setTextColor(trackDeleteConfirm?RED:WHITE,BG);
-  canvas.setCursor(8,h-17);
-  if(trackDeleteConfirm)canvas.print("CLICK: DELETE  B: CANCEL");
-  else canvas.print("A/CLICK: OPEN  HOLD: CLEAR");
+  canvas.setTextSize(1);canvas.setTextColor(trackDeleteConfirm?RED:WHITE);
+  if(portrait){
+    canvas.setCursor(7,h-22);canvas.print(trackDeleteConfirm?"CLICK: DELETE":"CLICK: OPEN");
+    canvas.setCursor(7,h-12);canvas.print(trackDeleteConfirm?"B: CANCEL":"HOLD: CLEAR");
+  }else{
+    canvas.setCursor(7,h-13);canvas.print(trackDeleteConfirm?"CLICK: DELETE  B: CANCEL":"CLICK: OPEN  HOLD: CLEAR");
+  }
 }
 void drawSettings(){
-  int w=canvas.width(),h=canvas.height();
-  const char* labels[]={"VOLUME","BRIGHT","REVERSE MAP","AUTO PLAY","RESET SPEED","ORIENTATION","PALETTE","SKIN"};
-  const char* shortLabels[]={"VOL","BRGT","REV","AUTO","RESET","ORIENT","PAL","SKIN"};
-  const int visible=h>w?8:7;
-  const int scrollTop=constrain(settingsSelection-visible+1,0,8-visible);
-  // Reserve a slim right-hand gutter so additional settings are discoverable.
-  const int gutterX=w-6;
-  const int itemWidth=w-20;
-  for(int i=scrollTop;i<min(8,scrollTop+visible);i++){
-    int y=19+(i-scrollTop)*(h>w?14:12);bool sel=settingsSelection==i;
-    uint16_t surface=PANEL;
-    canvas.fillRect(7,y,itemWidth,14,surface);
-    canvas.drawRect(7,y,itemWidth,14,sel?(settingsEditing?palette().active:themeAccent()):TRIM);
-    canvas.setTextColor(sel?themeAccent():WHITE,surface);canvas.setTextSize(1);
-    canvas.setCursor(13,y+3);canvas.print(h>w?shortLabels[i]:labels[i]);
-    canvas.setCursor(w-(h>w?54:77),y+3);
-    if(i==0)canvas.printf("%u%%",unsigned(volumePct));
-    else if(i==1)canvas.printf("%u%%",unsigned(brightnessPct));
-    else if(i==2)canvas.print(invertedReverse?"INVERTED":"NORMAL");
-    else if(i==3)canvas.print(autoPlay?"ON":"OFF");
-    else if(i==4)canvas.print(resetSpeedAfterRecord?"ON":"OFF");
-    else if(i==5)canvas.print(orientationMode==OrientationMode::Landscape?"LAND":orientationMode==OrientationMode::Portrait?"VERT":"AUTO");
-    else if(i==6)canvas.print(palette().name);
-    else if(i==7)canvas.print(skinSelection==1?"MINIMAL":skinSelection==2?"ARCADE":"CLASSIC");
+  const int w=canvas.width(),h=canvas.height();const bool portrait=h>w;
+  drawPageHeading("SETTINGS",3);
+  const char* labels[]={"VOLUME","BRIGHT","REV MAP","AUTO PLAY","RESET SPEED","ORIENTATION","PALETTE","SKIN"};
+  const char* shortLabels[]={"VOL","BRIGHT","REV MAP","AUTO","RESET","ORIENT","PAL","SKIN"};
+  const int count=8;const int rowH=portrait?20:12;
+  const int available=h-54-15;
+  const int visible=max(1,min(count,available/rowH));
+  const int top=constrain(settingsSelection-visible+1,0,count-visible);
+  const bool scroll=count>visible;
+  const int right=w-(scroll?10:5);const int itemWidth=right-5;
+  for(int i=top;i<top+visible;i++){
+    const int y=portrait?39+(i-top)*rowH:37+(i-top)*rowH;
+    const bool sel=settingsSelection==i;
+    canvas.fillRect(5,y,itemWidth,rowH-1,PANEL);
+    canvas.drawRect(5,y,itemWidth,rowH-1,sel?(settingsEditing?palette().active:themeAccent()):TRIM);
+    char val[18];
+    if(i==0)snprintf(val,sizeof(val),"%u%%",unsigned(volumePct));
+    else if(i==1)snprintf(val,sizeof(val),"%u%%",unsigned(brightnessPct));
+    else if(i==2)snprintf(val,sizeof(val),"%s",invertedReverse?"INV":"NORMAL");
+    else if(i==3)snprintf(val,sizeof(val),"%s",autoPlay?"ON":"OFF");
+    else if(i==4)snprintf(val,sizeof(val),"%s",resetSpeedAfterRecord?"ON":"OFF");
+    else if(i==5)snprintf(val,sizeof(val),"%s",orientationMode==OrientationMode::Landscape?"LAND":orientationMode==OrientationMode::Portrait?"VERT":"AUTO");
+    else if(i==6)snprintf(val,sizeof(val),"%s",palette().name);
+    else snprintf(val,sizeof(val),"%s",skinSelection==1?"MINIMAL":skinSelection==2?"ARCADE":"CLASSIC");
+    const int xval=right-5-int(strlen(val))*6;
+    canvas.setTextSize(1);canvas.setTextColor(sel?themeAccent():WHITE);
+    canvas.setCursor(10,y+(portrait?6:3));canvas.print(portrait?shortLabels[i]:labels[i]);
+    canvas.setCursor(xval,y+(portrait?6:3));canvas.print(val);
   }
-  if(8>visible){
-    const int firstY=19, trackH=visible*(h>w?14:12);
-    canvas.drawFastVLine(gutterX,firstY,trackH,TRIM);
-    const int thumbH=max(9,trackH*visible/8);
-    const int thumbY=firstY+(trackH-thumbH)*scrollTop/(8-visible);
-    canvas.fillRoundRect(gutterX-1,thumbY,3,thumbH,1,themeAccent());
+  if(scroll){
+    const int trackY=portrait?39:37,trackH=visible*rowH;
+    canvas.drawFastVLine(w-5,trackY,trackH,TRIM);
+    const int thumbH=max(7,trackH*visible/count);
+    canvas.fillRect(w-6,trackY+(trackH-thumbH)*top/max(1,count-visible),3,thumbH,themeAccent());
   }
-  canvas.setTextColor(WHITE,BG);canvas.setCursor(7,h-14);
-  canvas.print(settingsEditing?"TURN:CHANGE CLICK:DONE":"TURN:SELECT CLICK:EDIT");
+  // A single short footer fits all portrait and landscape views.
+  canvas.setTextColor(MUTED);canvas.setTextSize(1);
+  canvas.setCursor(7,h-11);canvas.print(settingsEditing?"TURN: CHANGE":"CLICK: EDIT");
 }
-
 void drawInfoPage(bool about){
-  canvas.setTextSize(1);canvas.setTextColor(themeAccent(),BG);
+  const int w=canvas.width(),h=canvas.height(),portrait=h>w;
+  drawPageHeading(about?"ABOUT":"HOW-TO",about?5:4);
+  canvas.setTextSize(1);
   if(about){
-    canvas.setCursor(8,29);canvas.print("SOUND-CHOMP ");canvas.print(kFirmwareVersion);
-    canvas.setTextColor(WHITE,BG);canvas.setCursor(8,47);canvas.print("BUILT BY u/eyeofbri");
-    canvas.setCursor(8,65);canvas.print("BUILT FOR AIDEN");
-    canvas.setCursor(8,82);canvas.print("github.com/eyeofbri/");
-    canvas.setCursor(8,92);canvas.print("Sound-Chomp");
+    canvas.setTextColor(themeAccent());canvas.setCursor(8,43);canvas.print(kFirmwareVersion);
+    canvas.setTextColor(WHITE);canvas.setCursor(8,60);canvas.print("BY u/eyeofbri");
+    canvas.setCursor(8,76);canvas.print("FOR AIDEN");
+    canvas.setCursor(8,95);canvas.print("github.com/");
+    canvas.setCursor(8,107);canvas.print("eyeofbri/Sound-Chomp");
   }else{
-    const char* keys[]={"TAP A:","HOLD A:","RELEASE:","WHEEL:","CLICK:","HOLD CLICK:","B:"};
-    const char* descriptions[]={"PLAY / STOP","RECORD","STOP RECORDING","NAV / ADJUST","EDIT / PLAY","FOCUS PLAY","MENU"};
+    const char* title[]={"TAP A","HOLD A","RELEASE A","WHEEL","CLICK","HOLD CLICK","B"};
+    const char* detail[]={"PLAY / STOP","RECORD","STOP RECORD","NAV / ADJUST","EDIT / PLAY","FOCUS / NEXT*","TOGGLE MENU"};
+    const int rowH=portrait?26:12;
     for(int i=0;i<7;i++){
-      int y=24+i*14;
-      canvas.setTextColor(themeAccent(),BG);canvas.setCursor(8,y);canvas.print(keys[i]);
-      canvas.setTextColor(WHITE,BG);canvas.setCursor(88,y);canvas.print(descriptions[i]);
+      const int y=portrait?39+i*rowH:39+i*rowH;
+      canvas.setTextColor(themeAccent());canvas.setCursor(8,y);canvas.print(title[i]);
+      canvas.setTextColor(WHITE);
+      if(portrait){canvas.setCursor(8,y+11);canvas.print(detail[i]);}
+      else {canvas.setCursor(80,y);canvas.print(detail[i]);}
     }
+    if(portrait){canvas.setTextColor(MUTED);canvas.setCursor(7,h-10);canvas.print("*NEXT: ON PLAY");}
   }
-  canvas.setTextColor(MUTED,BG);canvas.setCursor(8,canvas.height()-13);canvas.print("B: MENU");
 }
 void drawCharge(){
-  const int w=canvas.width();
-  const int bx=44,by=35,bw=w-88,bh=56;
-  canvas.drawRoundRect(bx,by,bw,bh,6,themeAccent());
-  canvas.fillRect(bx-8,by+17,8,22,themeAccent()); // same left-side terminal
-  const int fill=(bw-10)*batteryPct/100;
-  canvas.fillRoundRect(bx+5,by+5,fill,bh-10,3,batteryPct<20?palette().warning:themeAccent());
-  canvas.setTextSize(2);canvas.setTextColor(themeAccent(),BG);
+  const int w=canvas.width(),h=canvas.height();const bool portrait=h>w;
+  drawPageHeading("CHARGE",6);
+  const int bx=portrait?5:32;
+  const int bw=portrait?w-12:w-64;
+  const int bh=portrait?52:44;
+  const int by=portrait?(h-bh)/2:46;
+  const uint16_t c=batteryPct<20?palette().warning:themeAccent();
+  canvas.drawRoundRect(bx,by,bw,bh,5,themeAccent());
+  canvas.fillRect(bx-2,by+bh/3,2,bh/3,themeAccent());
+  const int fill=max(0,(bw-10)*int(batteryPct)/100);
+  if(fill>0)canvas.fillRoundRect(bx+5,by+5,fill,bh-10,2,c);
   char buf[12];snprintf(buf,sizeof buf,"%u%%",unsigned(batteryPct));
-  canvas.setCursor((w-int(strlen(buf))*12)/2,101);canvas.print(buf);
-  if(charging){canvas.setTextSize(1);canvas.setCursor(92,23);canvas.print("CHARGING");}
-}
-uint8_t effectLastField(int fx){return fx==FxEcho||fx==FxWarble||fx==FxBitcrush?2:1;}
-void drawEffects(){
-  const int w=canvas.width(),h=canvas.height();
-  const bool portrait=h>w;
-  // Three compact visible rows on landscape; six on portrait.
-  const int visible=portrait?6:3, rowH=portrait?27:25;
-  const int first=max(0,min(effectsSelection-visible/2,FxCount-visible));
+  canvas.setTextSize(2);canvas.setTextColor(themeAccent());
+  canvas.setCursor((w-int(strlen(buf))*12)/2,by+bh+4);canvas.print(buf);
   canvas.setTextSize(1);
-  for(int pos=0;pos<visible;pos++){
-    const int row=first+pos,y=23+pos*rowH;
-    const bool focus=effectsSelection==row;
-    const uint16_t border=focus?themeAccent():TRIM;
-    canvas.drawRect(5,y,w-14,rowH-3,border);
-    canvas.setTextColor(focus?themeAccent():WHITE);
-    canvas.setCursor(9,y+6);canvas.print(kEffectNames[row]);
-    canvas.setTextColor((focus&&effectsEditing&&effectsField==0)?palette().active:WHITE);
-    const char* slot=slotLabel(effectSlot[row]);
-    canvas.setCursor(w-12-int(strlen(slot))*6,y+6);canvas.print(slot);
-  }
-  // Scrollbar, matching the other scrollable settings list.
-  const int sx=w-4,trackY=23,trackH=visible*rowH-3;
-  canvas.drawFastVLine(sx,trackY,trackH,TRIM);
-  const int thumbH=max(12,trackH*visible/FxCount);
-  canvas.fillRect(sx-1,trackY+(trackH-thumbH)*first/max(1,FxCount-visible),3,thumbH,themeAccent());
-  const int detailY=portrait?198:101;
-  const int fx=effectsSelection;
-  canvas.setTextColor(palette().active);canvas.setCursor(7,detailY);
-  if(fx==FxEcho)canvas.printf("MIX %u%% DEL %ums",unsigned(echoWet),unsigned(echoDelayMs));
-  else if(fx==FxStutter)canvas.printf("SLICE %ums",unsigned(stutterSliceMs));
-  else if(fx==FxRobot)canvas.printf("LEVEL %u%%",unsigned(robotIntensity));
-  else if(fx==FxWarble)canvas.printf("RATE %uHz DEP %u%%",unsigned(warbleRate),unsigned(warbleDepth));
-  else if(fx==FxBitcrush)canvas.printf("BITS %u HOLD %u",unsigned(crushBits),unsigned(crushHold));
-  else canvas.printf("FILTER %u%%",unsigned(telephoneStrength));
-  canvas.setTextColor(MUTED);canvas.setCursor(7,h-12);
-  canvas.print(effectsEditing?"TURN: CHANGE CLICK: NEXT":"TURN: SCROLL CLICK: EDIT");
+  const char* status=charging?"CHARGING":"ON BATTERY";
+  canvas.setCursor((w-int(strlen(status))*6)/2,by-12);canvas.print(status);
 }
-
+void drawEffects(){
+  const int w=canvas.width(),h=canvas.height();const bool portrait=h>w;
+  drawPageHeading("EFFECTS",2);
+  const int visible=portrait?5:2;
+  const int rowH=portrait?31:24;
+  const int first=max(0,min(effectsSelection-visible/2,int(FxCount)-visible));
+  for(int pos=0;pos<visible;pos++){
+    const int fx=first+pos,y=portrait?40+pos*rowH:39+pos*rowH;
+    const bool focus=effectsSelection==fx;
+    canvas.drawRect(5,y,w-15,rowH-2,focus?themeAccent():TRIM);
+    canvas.setTextSize(1);canvas.setTextColor(focus?themeAccent():WHITE);
+    canvas.setCursor(9,y+4);canvas.print(kEffectNames[fx]);
+    const char* slot=slotLabel(effectSlot[fx]);
+    const uint16_t slotColor=(focus&&effectsEditing&&effectsField==0)?palette().warning:(focus?themeAccent():WHITE);
+    canvas.setTextColor(slotColor);
+    canvas.setCursor(w-17-int(strlen(slot))*6,y+4);canvas.print(slot);
+    if(portrait){
+      // Focus only the editable parameter, not the entire bottom row.
+      char p1[16],p2[16];p1[0]=0;p2[0]=0;
+      switch(fx){
+        case FxEcho:snprintf(p1,sizeof p1,"MIX %u%%",unsigned(echoWet));snprintf(p2,sizeof p2,"DEL %ums",unsigned(echoDelayMs));break;
+        case FxStutter:snprintf(p1,sizeof p1,"SLICE %ums",unsigned(stutterSliceMs));break;
+        case FxRobot:snprintf(p1,sizeof p1,"LEVEL %u%%",unsigned(robotIntensity));break;
+        case FxWarble:snprintf(p1,sizeof p1,"RATE %uHz",unsigned(warbleRate));snprintf(p2,sizeof p2,"DEP %u%%",unsigned(warbleDepth));break;
+        case FxBitcrush:snprintf(p1,sizeof p1,"BITS %u",unsigned(crushBits));snprintf(p2,sizeof p2,"HOLD %u",unsigned(crushHold));break;
+        default:snprintf(p1,sizeof p1,"FILTER %u%%",unsigned(telephoneStrength));break;
+      }
+      canvas.setTextColor((focus&&effectsEditing&&effectsField==1)?palette().warning:MUTED);
+      canvas.setCursor(9,y+17);canvas.print(p1);
+      if(p2[0]){canvas.setTextColor((focus&&effectsEditing&&effectsField==2)?palette().warning:MUTED);
+       canvas.setCursor(w-17-int(strlen(p2))*6,y+17);canvas.print(p2);}
+    }
+  }
+  const int trackY=portrait?40:39,trackH=visible*rowH;
+  canvas.drawFastVLine(w-5,trackY,trackH,TRIM);
+  const int thumbH=max(9,trackH*visible/int(FxCount));
+  canvas.fillRect(w-6,trackY+(trackH-thumbH)*first/max(1,int(FxCount)-visible),3,thumbH,themeAccent());
+  if(!portrait){
+    const int fx=effectsSelection;
+    char p1[22],p2[22];p1[0]=0;p2[0]=0;
+    if(fx==FxEcho){snprintf(p1,sizeof p1,"MIX %u%%",unsigned(echoWet));snprintf(p2,sizeof p2,"DELAY %ums",unsigned(echoDelayMs));}
+    else if(fx==FxStutter)snprintf(p1,sizeof p1,"SLICE %ums",unsigned(stutterSliceMs));
+    else if(fx==FxRobot)snprintf(p1,sizeof p1,"LEVEL %u%%",unsigned(robotIntensity));
+    else if(fx==FxWarble){snprintf(p1,sizeof p1,"RATE %uHz",unsigned(warbleRate));snprintf(p2,sizeof p2,"DEPTH %u%%",unsigned(warbleDepth));}
+    else if(fx==FxBitcrush){snprintf(p1,sizeof p1,"BITS %u",unsigned(crushBits));snprintf(p2,sizeof p2,"HOLD %u",unsigned(crushHold));}
+    else snprintf(p1,sizeof p1,"FILTER %u%%",unsigned(telephoneStrength));
+    canvas.setTextColor((effectsEditing&&effectsField==1)?palette().warning:WHITE);
+    canvas.setCursor(7,97);canvas.print(p1);
+    if(p2[0]){canvas.setTextColor((effectsEditing&&effectsField==2)?palette().warning:WHITE);canvas.setCursor(122,97);canvas.print(p2);}
+  }
+  canvas.setTextSize(1);canvas.setTextColor(MUTED);
+  canvas.setCursor(7,h-11);canvas.print(effectsEditing?"CLICK: NEXT":"CLICK: EDIT");
+}
 void draw(bool force=false){
   if(!canvasReady)return;
   if(page==Page::Charge&&chargeScreenOff){updateBattery();return;}
@@ -1027,8 +1090,20 @@ void recordClip(){
 // a buffer until at least two other buffers have been submitted. M5Unified
 // documents three rotating buffers as a safe strategy for generated audio.
 // During playback, PLAY-click stops; other buttons enter/exit adjustment mode.
+bool nextRecordedTrack(){
+  for(int step=1;step<kTrackCount;step++){
+    const int next=(activeTrack+step)%kTrackCount;
+    if(tracks[next].length && selectTrack(next)){updateWaveform();return true;}
+  }
+  return false;
+}
+bool advanceAfterPlayback=false;
 void handlePlayingWheelClick(bool& interrupted){
-  if(scrollLong){scrollLong=false;playerFocus=PlayerFocus::Play;playerEditing=false;}
+  if(scrollLong){
+    scrollLong=false;
+    if(playerFocus==PlayerFocus::Play&&!playerEditing){advanceAfterPlayback=true;interrupted=true;}
+    else{playerFocus=PlayerFocus::Play;playerEditing=false;}
+  }
   if(scrollShort){
     scrollShort=false;
     if(playerFocus==PlayerFocus::Play)interrupted=true;
@@ -1163,6 +1238,7 @@ void playClip(){
     delay(1);
   }
   M5.Speaker.stop();M5.Speaker.end();
+  if(advanceAfterPlayback){advanceAfterPlayback=false;nextRecordedTrack();}
   if(state!=State::Error)state=State::Idle;
   setStateLed();clearEvents();draw(true);
 }
@@ -1329,7 +1405,12 @@ void loop(){
       if(playerFocus==PlayerFocus::Play)playClip();
       else playerEditing=!playerEditing;
     }
-    if(scrollLong){playerFocus=PlayerFocus::Play;playerEditing=false;scrollLong=false;}
+    if(scrollLong){
+      scrollLong=false;
+      if(playerFocus==PlayerFocus::Play&&!playerEditing){
+        nextRecordedTrack();
+      }else {playerFocus=PlayerFocus::Play;playerEditing=false;}
+    }
   }else if(page==Page::Tracks){
     if(trackDeleteConfirm){
       if(scrollShort||M5.BtnA.wasPressed()){
