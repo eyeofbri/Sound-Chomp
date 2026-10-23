@@ -42,7 +42,7 @@ constexpr size_t kStutterCapacity=kSampleRate*400/1000;
 int16_t* stutterHistory=nullptr;
 size_t stutterPos=0, stutterFilled=0;
 uint32_t effectSampleClock=0;
-constexpr const char* kFirmwareVersion="v0.8.0-dev (5J)";
+constexpr const char* kFirmwareVersion="v0.8.0-dev (5J.2)";
 // Fixed library, user-assignable FX slots (0=UNUSED, 1..3=player buttons).
 enum EffectId:uint8_t {FxEcho=0,FxStutter,FxRobot,FxWarble,FxBitcrush,FxTelephone,FxCount};
 constexpr const char* kEffectNames[FxCount]={"ECHO","STUTTER","ROBOT","WARBLE","BITCRUSH","TELEPHONE"};
@@ -165,13 +165,39 @@ struct Track {int16_t* pcm=nullptr;size_t length=0;};
 Track tracks[kTrackCount];
 int activeTrack=0,trackSelection=0;
 // Phase 5J: non-destructive display names and track-action navigation.
-enum class TrackUiMode : uint8_t { List, Actions, DeletePrompt, Rename };
+enum class TrackUiMode : uint8_t { List, Actions, DeletePrompt, Rename, Reorder };
 TrackUiMode trackUiMode=TrackUiMode::List;
-uint8_t trackAction=0; // PLAY, RENAME, DELETE
+uint8_t trackAction=0; // PLAY, RENAME, DELETE, LOCK, MOVE
+bool trackLocked[kTrackCount]{};
+uint8_t trackOrder[kTrackCount]={0,1,2,3}; // display positions only; PCM file IDs never move
+uint8_t renameFocus=0; // CHAR / BACKSPACE / SAVE / CANCEL
+bool renameCharacterEditing=false;
+int selectedTrackId(){return int(trackOrder[trackSelection]);}
+void saveTrackOrganization(Preferences& preferences){
+  for(int i=0;i<kTrackCount;i++){
+    char key[14];snprintf(key,sizeof key,"trkLock%d",i);preferences.putBool(key,trackLocked[i]);
+    snprintf(key,sizeof key,"trkOrd%d",i);preferences.putUChar(key,trackOrder[i]);
+  }
+}
+void loadTrackOrganization(Preferences& preferences){
+  bool seen[kTrackCount]{};bool valid=true;
+  for(int i=0;i<kTrackCount;i++){
+    char key[14];snprintf(key,sizeof key,"trkLock%d",i);trackLocked[i]=preferences.getBool(key,false);
+    snprintf(key,sizeof key,"trkOrd%d",i);trackOrder[i]=preferences.getUChar(key,i);
+    if(trackOrder[i]>=kTrackCount)valid=false;
+    else if(seen[trackOrder[i]])valid=false;else seen[trackOrder[i]]=true;
+  }
+  if(!valid)for(int i=0;i<kTrackCount;i++)trackOrder[i]=i;
+}
+void swapTrackDisplayPositions(int first,int second,Preferences& preferences){
+  if(first<0||second<0||first>=kTrackCount||second>=kTrackCount)return;
+  uint8_t t=trackOrder[first];trackOrder[first]=trackOrder[second];trackOrder[second]=t;
+  saveTrackOrganization(preferences);
+}
 char trackNames[kTrackCount][11]{};
 char renameDraft[11]{};
 uint8_t renameCharacter=0;
-constexpr char kRenameAlphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_<";
+constexpr char kRenameAlphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_";
 void setDefaultTrackName(int i){snprintf(trackNames[i],sizeof(trackNames[i]),"CHOMP %02d",i+1);}
 void loadTrackNames(Preferences& preferences){
   for(int i=0;i<kTrackCount;i++){
@@ -609,34 +635,36 @@ void drawTransportButtons(int w,int h){
 // Single non-wrapping transport/status strip. The speed number remains in the
 // lower control button; only direction and enabled indicators appear here.
 void drawCompactStatus(int areaLeft,int areaWidth,int y,bool center){
-  char text[50];
-  int used=snprintf(text,sizeof(text),"TRK:%d",activeTrack+1);
+  // Display the saved track name, not its hardware slot number. Reserve room
+  // for the direction arrow and keep the entire line within the player pane.
+  char suffix[24]={0};
+  size_t used=0;
   for(int slot=1;slot<=3;slot++){
     const int fx=effectForSlot(slot);
-    if(fx>=0&&effectOn[fx]&&used>=0&&used<int(sizeof(text)))
-      used+=snprintf(text+used,sizeof(text)-used," E%d",slot);
+    if(fx>=0&&effectOn[fx]&&used<sizeof(suffix)-1)
+      used+=snprintf(suffix+used,sizeof(suffix)-used," E%d",slot);
   }
-  if(loopMode!=LoopMode::Off && used>=0 && used<int(sizeof(text)))
-    snprintf(text+used,sizeof(text)-used," %s",loopMode==LoopMode::One?"L1":"ALL");
-  canvas.setTextSize(1);
-  // The 135px portrait display cannot fit the landscape-length status.
-  // Use a deliberately compact all-states indicator instead of clipping.
-  if(center && areaWidth<160){
-    int end=snprintf(text,sizeof(text),"T%d",activeTrack+1);
-    for(int slot=1;slot<=3;slot++){
-      const int fx=effectForSlot(slot);
-      if(fx>=0&&effectOn[fx]&&end<int(sizeof(text)))
-        end+=snprintf(text+end,sizeof(text)-end," %d",slot);
-    }
-    if(loopMode!=LoopMode::Off&&end<int(sizeof(text)))
-      snprintf(text+end,sizeof(text)-end," %s",loopMode==LoopMode::One?"L1":"ALL");
+  if(loopMode!=LoopMode::Off&&used<sizeof(suffix)-1)
+    snprintf(suffix+used,sizeof(suffix)-used," %s",loopMode==LoopMode::One?"L1":"ALL");
+  const int available=max(0,areaWidth-24); // direction glyph + gap
+  const int suffixWidth=int(strlen(suffix))*6;
+  const int maxNameChars=max(0,min(10,(available-suffixWidth)/6));
+  char label[44]={0};
+  if(maxNameChars>0){
+    strncpy(label,trackNames[activeTrack],size_t(maxNameChars));
+    label[maxNameChars]=0;
   }
-  const int fullWidth=19+5+int(strlen(text))*6;
-  int x=center?areaLeft+(areaWidth-fullWidth)/2:areaLeft;
-  x=max(areaLeft,x);
+  strncat(label,suffix,sizeof(label)-strlen(label)-1);
+  // On very small displays favor the recording name over FX indicators.
+  if(int(strlen(label))*6>available){
+    strncpy(label,trackNames[activeTrack],size_t(min(10,available/6)));
+    label[min(10,available/6)]=0;
+  }
+  const int fullWidth=24+int(strlen(label))*6;
+  const int x=center?max(areaLeft,areaLeft+(areaWidth-fullWidth)/2):areaLeft;
   drawDirectionIcon(x,y+1,speed()<0);
-  canvas.setTextColor(WHITE);
-  canvas.setCursor(x+24,y);canvas.print(text);
+  canvas.setTextSize(1);canvas.setTextColor(WHITE);
+  canvas.setCursor(x+24,y);canvas.print(label);
 }
 
 // Compact detail line shared by both orientations. Keep labels human-readable
@@ -760,20 +788,59 @@ void drawPageHeading(const char* name,int symbol){
   const int y=21;
   canvas.fillRect(3,y,w-6,15,themeAccent());
   canvas.setTextSize(1);canvas.setTextColor(TFT_BLACK,themeAccent());
-  if(symbol>=0)drawMenuIcon(9,y+2,symbol,TFT_BLACK);
+  if(symbol>=0)drawMenuIcon(9,y+1,symbol,TFT_BLACK);
   canvas.setCursor(symbol>=0?25:9,y+4);canvas.print(name);
 }
+// Compact pixel-art track actions. Strokes are rendered at native panel
+// resolution and use the supplied palette color, not raster backgrounds.
+void drawTrackActionIcon(int action,int x,int y,uint16_t c,bool locked){
+  switch(action){
+    case 0: // Play: 7px triangle
+      for(int i=0;i<7;i++)canvas.drawFastVLine(x+i,y+abs(3-i),7-2*abs(3-i),c);
+      break;
+    case 1: // Rename: serif capital T, designed to read at 9px
+      canvas.drawFastHLine(x,y,9,c);
+      canvas.drawFastHLine(x+1,y+1,7,c);
+      canvas.drawFastVLine(x+4,y+1,7,c);
+      canvas.drawFastHLine(x+2,y+7,5,c);
+      break;
+    case 2: // Delete: lidded trash can with two slots
+      canvas.drawFastHLine(x+1,y+2,8,c);canvas.drawFastHLine(x+3,y,4,c);
+      canvas.drawRect(x+2,y+3,6,6,c);
+      canvas.drawFastVLine(x+4,y+4,4,c);canvas.drawFastVLine(x+6,y+4,4,c);
+      break;
+    case 3: // Closed/open padlocks
+      canvas.drawRect(x+1,y+4,8,5,c);canvas.drawPixel(x+5,y+6,c);
+      if(!locked){
+        canvas.drawFastHLine(x+2,y+1,4,c);canvas.drawPixel(x+1,y+2,c);
+        canvas.drawPixel(x+1,y+3,c);
+      }else{
+        canvas.drawFastHLine(x+3,y+1,5,c);canvas.drawPixel(x+2,y+2,c);
+        canvas.drawPixel(x+2,y+3,c);canvas.drawPixel(x+8,y+2,c);
+        canvas.drawPixel(x+8,y+3,c);
+      }
+      break;
+    case 4: // Move: thick upward arrow
+      canvas.drawFastVLine(x+4,y+2,7,c);canvas.drawFastVLine(x+5,y+2,7,c);
+      canvas.drawFastHLine(x+2,y+2,6,c);
+      canvas.drawFastHLine(x+3,y+1,4,c);
+      canvas.drawFastHLine(x+4,y,2,c);
+      break;
+  }
+}
+
 void drawTracks(){
   const int w=canvas.width(),h=canvas.height();const bool portrait=h>w;
   drawPageHeading("TRACKS",1);
   const int rowH=portrait?40:19;
   const int firstY=portrait?40:39;
-  const int actionWidth=portrait?19:21;
+  const int actionWidth=portrait?15:14;
   const int actionGap=2;
   const int right=w-7;
-  const int actionStart=right-3*actionWidth-2*actionGap;
+  const int actionStart=right-5*actionWidth-4*actionGap;
   for(int i=0;i<kTrackCount;i++){
     const int y=firstY+i*rowH;
+    const int id=trackOrder[i];
     const bool selected=(i==trackSelection);
     const uint16_t focus=selected?RED:TRIM;
     canvas.fillRect(5,y,w-10,rowH-2,PANEL);
@@ -781,49 +848,82 @@ void drawTracks(){
     canvas.setTextSize(1);
     const uint16_t ink=selected?RED:WHITE;
     canvas.setTextColor(ink,PANEL);
-    char label[20];snprintf(label,sizeof(label),"%c%s",i==activeTrack?'*':' ',trackNames[i]);
+    char label[20];snprintf(label,sizeof(label),"%c%s",id==activeTrack?'*':' ',trackNames[id]);
     const int maxChars=portrait?12:14;
     label[maxChars]=0;
     canvas.setCursor(8,y+(portrait?4:5));canvas.print(label);
     char duration[12];
-    if(tracks[i].length)snprintf(duration,sizeof duration,"%.1fs",double(tracks[i].length)/kSampleRate);
+    if(tracks[id].length)snprintf(duration,sizeof duration,"%.1fs",double(tracks[id].length)/kSampleRate);
     else snprintf(duration,sizeof duration,"EMPTY");
     canvas.setTextColor(MUTED,PANEL);
     // The dedicated duration line prevents labels and controls from colliding.
     if(portrait)canvas.setCursor(9,y+17);
     else canvas.setCursor(actionStart-5-int(strlen(duration))*6,y+5);
     if(portrait||actionStart-5-int(strlen(duration))*6>90)canvas.print(duration);
-    const char* actionText[]={">","T","X"};
-    for(int a=0;a<3;a++){
+    if(trackLocked[id]){
+      canvas.setTextColor(palette().warning,PANEL);
+      if(portrait){canvas.setCursor(w-17,y+4);canvas.print("L");}
+      else {canvas.setCursor(actionStart-10,y+5);canvas.print("!");}
+    }
+    for(int a=0;a<5;a++){
       const int ax=actionStart+a*(actionWidth+actionGap);
       const int ay=y+(portrait?rowH-24:2);
       const int ah=portrait?19:rowH-6;
       const bool focused=selected&&trackUiMode==TrackUiMode::Actions&&trackAction==a;
-      const uint16_t actionColor=focused?palette().warning:(selected?RED:TRIM);
+      const bool disabled=a==2&&trackLocked[id];
+      const uint16_t actionColor=disabled?MUTED:(focused?palette().warning:(selected?RED:TRIM));
       canvas.drawRect(ax,ay,actionWidth,ah,actionColor);
-      canvas.setTextColor(focused?palette().warning:WHITE,PANEL);
-      canvas.setCursor(ax+(actionWidth-6)/2,ay+(ah-8)/2);canvas.print(actionText[a]);
+      const int ix=ax+(actionWidth-9)/2;
+      const int iy=ay+(ah-9)/2;
+      drawTrackActionIcon(a,ix,iy,disabled?MUTED:(focused?palette().warning:WHITE),trackLocked[id]);
     }
   }
-  if(trackUiMode==TrackUiMode::DeletePrompt||trackUiMode==TrackUiMode::Rename){
+  if(trackUiMode==TrackUiMode::DeletePrompt||trackUiMode==TrackUiMode::Rename||trackUiMode==TrackUiMode::Reorder){
     // Modal intentionally overlays rows. No deletion is possible from its default state.
-    const int mw=w-16,mh=portrait?72:65,mx=8,my=(h-mh)/2;
+    const bool moving=trackUiMode==TrackUiMode::Reorder;
+    const int mw=moving?((w*3)/4):w-16;
+    const int mh=trackUiMode==TrackUiMode::Rename?(portrait?100:79):(portrait?72:65);
+    const int mx=moving?w-mw-3:8;
+    const int my=(h-mh)/2;
     canvas.fillRect(mx,my,mw,mh,BG);canvas.drawRect(mx,my,mw,mh,palette().warning);
     canvas.setTextSize(1);canvas.setTextColor(palette().warning,BG);
-    canvas.setCursor(mx+6,my+7);canvas.print(trackUiMode==TrackUiMode::DeletePrompt?"DELETE TRACK?":"RENAME TRACK");
+    canvas.setCursor(mx+6,my+7);canvas.print(trackUiMode==TrackUiMode::DeletePrompt?"DELETE TRACK?":trackUiMode==TrackUiMode::Reorder?"MOVE TRACK":"RENAME TRACK");
     canvas.setTextColor(WHITE,BG);
-    if(trackUiMode==TrackUiMode::DeletePrompt){
-      canvas.setCursor(mx+6,my+23);canvas.print(trackNames[trackSelection]);
+    if(trackUiMode==TrackUiMode::Reorder){
+      canvas.setCursor(mx+6,my+24);canvas.print("TURN: MOVE");
+      canvas.setCursor(mx+6,my+39);canvas.print("CLICK: SET");
+      canvas.setCursor(mx+6,my+51);canvas.print("B: DONE");
+    }else if(trackUiMode==TrackUiMode::DeletePrompt){
+      canvas.setCursor(mx+6,my+23);canvas.print(trackNames[selectedTrackId()]);
       canvas.setCursor(mx+6,my+42);canvas.print("B: NO");
       canvas.setTextColor(palette().warning,BG);
       canvas.setCursor(mx+6,my+53);canvas.print("HOLD CLICK: YES");
     }else{
-      canvas.setCursor(mx+6,my+24);canvas.print(renameDraft);
-      char choice[3]={kRenameAlphabet[renameCharacter],0,0};
-      canvas.setTextColor(palette().warning,BG);
-      canvas.setCursor(mx+6,my+40);canvas.print("ADD: ");canvas.print(choice);
-      canvas.setTextColor(WHITE,BG);
-      canvas.setCursor(mx+6,my+55);canvas.print("CLICK:+  HOLD:SAVE");
+      canvas.setCursor(mx+6,my+20);canvas.print(renameDraft);
+      const int n=int(sizeof(kRenameAlphabet)-1);
+      canvas.setTextColor(renameFocus==0?palette().warning:WHITE,BG);
+      canvas.setCursor(mx+6,my+34);canvas.print("CHAR:");
+      for(int k=-2;k<=2;k++){
+        const int idx=(int(renameCharacter)+k+n)%n;
+        const char c=kRenameAlphabet[idx]==' '? '_':kRenameAlphabet[idx];
+        canvas.setTextColor(k==0&&renameFocus==0?palette().warning:MUTED,BG);
+        canvas.setCursor(mx+38+(k+2)*10,my+34);canvas.print(c);
+      }
+      if(portrait){
+        const char* opts[]={"BACKSPACE","SAVE","CANCEL"};
+        for(int k=0;k<3;k++){
+          canvas.setTextColor(renameFocus==k+1?palette().warning:WHITE,BG);
+          canvas.setCursor(mx+6,my+48+k*12);canvas.print(opts[k]);
+        }
+        canvas.setTextColor(MUTED,BG);canvas.setCursor(mx+6,my+88);canvas.print("HOLD: NEXT");
+      }else{
+        const char* opts[]={"BACKSPACE","SAVE","CANCEL"};
+        for(int k=0;k<3;k++){
+          canvas.setTextColor(renameFocus==k+1?palette().warning:WHITE,BG);
+          canvas.setCursor(mx+6+k*62,my+49);canvas.print(opts[k]);
+        }
+        canvas.setTextColor(MUTED,BG);canvas.setCursor(mx+6,my+65);canvas.print("HOLD: NEXT FIELD");
+      }
     }
   }
 }
@@ -878,15 +978,16 @@ void drawInfoPage(bool about){
     canvas.setCursor(8,95);canvas.print("github.com/");
     canvas.setCursor(8,107);canvas.print("eyeofbri/Sound-Chomp");
   }else{
-    const char* title[]={"TAP A","HOLD A","RELEASE A","WHEEL","CLICK","HOLD CLICK","B"};
-    const char* detail[]={"PLAY / STOP","RECORD","STOP RECORD","NAV / ADJUST","EDIT / PLAY","NEXT: ON PLAY","TOGGLE MENU"};
-    const int rowH=portrait?26:12;
-    for(int i=0;i<7;i++){
+    const char* title[]={"TAP A","HOLD A","RELEASE","WHEEL","CLICK","HOLD","B","TRACKS","LOCKED"};
+    const char* detail[]={"PLAY / STOP","RECORD","STOP RECORD","NAV / ADJUST","EDIT / PLAY","NEXT: ON PLAY","TOGGLE MENU","ACTIONS / MOVE","NO OVERWRITE"};
+    const int rowH=portrait?21:10;
+    for(int i=0;i<9;i++){
       const int y=portrait?39+i*rowH:39+i*rowH;
       canvas.setTextColor(themeAccent());canvas.setCursor(8,y);canvas.print(title[i]);
       canvas.setTextColor(WHITE);
-      if(portrait){canvas.setCursor(8,y+11);canvas.print(detail[i]);}
-      else {canvas.setCursor(80,y);canvas.print(detail[i]);}
+      if(portrait){canvas.setCursor(8,y+9);canvas.print(detail[i]);}
+      else {canvas.setCursor(82,y);canvas.print(detail[i]);}
+      if(i<8)canvas.drawFastHLine(7,y+rowH-2,w-14,TRIM);
     }
     if(portrait){canvas.setTextColor(MUTED);canvas.setCursor(7,h-10);canvas.print("");}
   }
@@ -992,10 +1093,14 @@ void handleWheel(int delta){
   if(page==Page::Home)homeSelection=constrain(homeSelection+delta,0,6);
   else if(page==Page::Tracks){
     if(trackUiMode==TrackUiMode::List)trackSelection=constrain(trackSelection+delta,0,kTrackCount-1);
-    else if(trackUiMode==TrackUiMode::Actions)trackAction=uint8_t(constrain(int(trackAction)+delta,0,2));
+    else if(trackUiMode==TrackUiMode::Actions)trackAction=uint8_t(constrain(int(trackAction)+delta,0,4));
+    else if(trackUiMode==TrackUiMode::Reorder){
+      const int next=constrain(trackSelection+delta,0,kTrackCount-1);
+      if(next!=trackSelection){swapTrackDisplayPositions(trackSelection,next,prefs);trackSelection=next;}
+    }
     else if(trackUiMode==TrackUiMode::Rename){
-      const int n=int(sizeof(kRenameAlphabet)-1);
-      renameCharacter=uint8_t((int(renameCharacter)+delta%n+n)%n);
+      if(renameFocus==0){const int n=int(sizeof(kRenameAlphabet)-1);renameCharacter=uint8_t((int(renameCharacter)+delta%n+n)%n);}
+      else renameFocus=uint8_t(constrain(int(renameFocus)+delta,0,3));
     }
   }
   else if(page==Page::Chomp){
@@ -1133,6 +1238,11 @@ void openSelection(){
 }
 void recordClip(){
   if(!samples)return;
+  if(trackLocked[activeTrack]){
+    Serial.println("Record blocked: track is locked");
+    limitFlashUntil=millis()+650;
+    return;
+  }
   captured=0;tracks[activeTrack].length=0;tapePosition=0.0f;M5.Speaker.end();
   if(!M5.Mic.begin()){state=State::Error;errorText="MIC BEGIN FAILED";return;}
   state=State::Recording;setStateLed();clearEvents();draw(true);
@@ -1422,7 +1532,8 @@ void setup(){
   }
   activeTrack=constrain(int(prefs.getUChar("active",0)),0,kTrackCount-1);
   trackSelection=activeTrack;
-  loadTrackNames(prefs);
+  loadTrackNames(prefs);loadTrackOrganization(prefs);
+  for(int i=0;i<kTrackCount;i++)if(trackOrder[i]==activeTrack){trackSelection=i;break;}
   samples=tracks[activeTrack].pcm;
   // The existing 8 MB partition scheme reserves the final ~1.5 MB for a filesystem.
   // WARNING: format-on-failure initializes an unformatted filesystem on first use.
@@ -1489,35 +1600,46 @@ void loop(){
     }else if(trackUiMode==TrackUiMode::Actions){
       if(click){
         if(trackAction==0){
-          if(selectTrack(trackSelection)){
+          if(selectTrack(selectedTrackId())){
             updateWaveform();page=Page::Chomp;playerFocus=PlayerFocus::Play;
             if(captured)playClip();
           }
         }else if(trackAction==1){
-          strncpy(renameDraft,trackNames[trackSelection],sizeof renameDraft);
+          strncpy(renameDraft,trackNames[selectedTrackId()],sizeof renameDraft);
           renameDraft[sizeof(renameDraft)-1]=0;
-          renameCharacter=0;trackUiMode=TrackUiMode::Rename;
-        }else trackUiMode=TrackUiMode::DeletePrompt;
+          renameCharacter=0;renameFocus=0;trackUiMode=TrackUiMode::Rename;
+        }else if(trackAction==2){
+          if(!trackLocked[selectedTrackId()])trackUiMode=TrackUiMode::DeletePrompt;
+          else limitFlashUntil=millis()+650;
+        }else if(trackAction==3){
+          const int id=selectedTrackId();trackLocked[id]=!trackLocked[id];saveTrackOrganization(prefs);
+        }else if(trackAction==4){trackUiMode=TrackUiMode::Reorder;}
       }
     }else if(trackUiMode==TrackUiMode::DeletePrompt){
       // Requiring a HOLD rather than a tap prevents accidental deletions.
       if(hold){
-        tracks[trackSelection].length=0;deleteSavedTrack(trackSelection);
-        if(trackSelection==activeTrack){captured=0;updateWaveform();}
+        const int id=selectedTrackId();
+        if(!trackLocked[id]){tracks[id].length=0;deleteSavedTrack(id);
+          if(id==activeTrack){captured=0;updateWaveform();}}
         trackUiMode=TrackUiMode::List;
       }
+    }else if(trackUiMode==TrackUiMode::Reorder){
+      if(click||hold)trackUiMode=TrackUiMode::Actions;
     }else if(trackUiMode==TrackUiMode::Rename){
-      if(click){
-        const size_t length=strlen(renameDraft);
-        if(kRenameAlphabet[renameCharacter]=='<'){if(length)renameDraft[length-1]=0;}
-        else if(length<10){renameDraft[length]=kRenameAlphabet[renameCharacter];renameDraft[length+1]=0;}
-      }else if(hold){
-        // Holding with an empty draft restores the default name.
-        if(!renameDraft[0])setDefaultTrackName(trackSelection);
-        else strncpy(trackNames[trackSelection],renameDraft,sizeof trackNames[trackSelection]);
-        trackNames[trackSelection][10]=0;
-        saveTrackName(prefs,trackSelection);
-        trackUiMode=TrackUiMode::Actions;
+      if(hold){renameFocus=uint8_t((renameFocus+1)%4);}
+      else if(click){
+        const int id=selectedTrackId();
+        if(renameFocus==0){
+          const size_t length=strlen(renameDraft);
+          if(length<10){renameDraft[length]=kRenameAlphabet[renameCharacter];renameDraft[length+1]=0;}
+        }else if(renameFocus==1){
+          const size_t length=strlen(renameDraft);if(length)renameDraft[length-1]=0;
+        }else if(renameFocus==2){
+          if(!renameDraft[0])setDefaultTrackName(id);
+          else strncpy(trackNames[id],renameDraft,sizeof trackNames[id]);
+          trackNames[id][10]=0;saveTrackName(prefs,id);
+          trackUiMode=TrackUiMode::Actions;
+        }else trackUiMode=TrackUiMode::Actions;
       }
     }
   }else if(page==Page::Settings){
