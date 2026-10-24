@@ -86,6 +86,7 @@ uint8_t portraitRotation=0;
 uint32_t lastOrientationPoll=0, orientationStableAt=0;
 uint8_t orientationCandidate=1;
 uint8_t effectsField=0; // 0=slot, 1... effect-specific parameters
+uint8_t pendingEffectSlot=0; // Preview only; commit on click, not wheel movement
 int focusSlot(PlayerFocus f){int index=int(f);return (index>=2&&index<=4)?index-1:0;}
 PlayerFocus nextVisibleFocus(PlayerFocus focus,int direction){
   int idx=int(focus);
@@ -838,7 +839,7 @@ void drawTracks(){
   drawPageHeading("TRACKS",1);
   if(trackUiMode==TrackUiMode::Actions){
     static const char* const kTrackActionLabels[]={"SELECT","EDIT","DELETE","LOCK","MOVE"};
-    const char* actionLabel=kTrackActionLabels[min(int(trackAction),4)];
+    const char* actionLabel=(trackAction==3) ? (trackLocked[selectedTrackId()] ? "UNLOCK" : "LOCK") : kTrackActionLabels[min(int(trackAction),4)];
     const int labelW=int(strlen(actionLabel))*6;
     // Label sits opposite the heading and beneath the top-right battery.
     // A dark inset maintains contrast with any primary palette color.
@@ -875,11 +876,6 @@ void drawTracks(){
     if(portrait)canvas.setCursor(9,y+17);
     else canvas.setCursor(actionStart-5-int(strlen(duration))*6,y+5);
     if(portrait||actionStart-5-int(strlen(duration))*6>90)canvas.print(duration);
-    if(trackLocked[id]){
-      canvas.setTextColor(palette().warning,PANEL);
-      if(portrait){canvas.setCursor(w-17,y+4);canvas.print("L");}
-      else {canvas.setCursor(actionStart-10,y+5);canvas.print("!");}
-    }
     for(int a=0;a<5;a++){
       const int ax=actionStart+a*(actionWidth+actionGap);
       const int ay=y+(portrait?rowH-24:2);
@@ -887,10 +883,12 @@ void drawTracks(){
       const bool focused=selected&&trackUiMode==TrackUiMode::Actions&&trackAction==a;
       const bool disabled=a==2&&trackLocked[id];
       const uint16_t actionColor=disabled?MUTED:(focused?palette().warning:(selected?RED:TRIM));
-      canvas.drawRect(ax,ay,actionWidth,ah,actionColor);
+      const bool lockedButton=(a==3&&trackLocked[id]);
+      if(lockedButton)canvas.fillRect(ax,ay,actionWidth,ah,palette().active);
+      canvas.drawRect(ax,ay,actionWidth,ah,lockedButton ? (focused ? palette().warning : palette().active) : actionColor);
       const int ix=ax+(actionWidth-9)/2;
       const int iy=ay+(ah-9)/2;
-      const uint16_t iconColor = disabled ? MUTED : ((a==3 && trackLocked[id]) ? palette().active : (focused ? palette().warning : WHITE));
+      const uint16_t iconColor = lockedButton ? TFT_BLACK : (disabled ? MUTED : (focused ? palette().warning : WHITE));
       drawTrackActionIcon(a,ix,iy,iconColor,trackLocked[id]);
     }
   }
@@ -950,7 +948,7 @@ void drawSettings(){
   drawPageHeading("SETTINGS",3);
   const char* labels[]={"VOLUME","BRIGHT","REV MAP","AUTO PLAY","RESET SPEED","ORIENTATION","PALETTE","SKIN"};
   const char* shortLabels[]={"VOL","BRIGHT","REV MAP","AUTO","RESET","ORIENT","PAL","SKIN"};
-  const int count=8;const int rowH=portrait?20:12;
+  const int count=8;const int rowH=portrait?20:11; // Six visible settings rows in landscape
   const int available=h-54-15;
   const int visible=max(1,min(count,available/rowH));
   const int top=constrain(settingsSelection-visible+1,0,count-visible);
@@ -1041,7 +1039,7 @@ void drawEffects(){
     canvas.drawRect(5,y,w-15,rowH-(portrait?2:4),focus?RED:TRIM);
     canvas.setTextSize(1);canvas.setTextColor(focus?RED:WHITE);
     canvas.setCursor(9,y+4);canvas.print(kEffectNames[fx]);
-    const char* slot=slotLabel(effectSlot[fx]);
+    const char* slot=slotLabel((focus&&effectsEditing&&effectsField==0)?pendingEffectSlot:effectSlot[fx]);
     const uint16_t slotColor=(focus&&effectsEditing&&effectsField==0)?palette().warning:(focus?RED:WHITE);
     canvas.setTextColor(slotColor);
     canvas.setCursor(w-17-int(strlen(slot))*6,y+4);canvas.print(slot);
@@ -1111,7 +1109,14 @@ void handleWheel(int delta){
   if(page==Page::Home)homeSelection=constrain(homeSelection+delta,0,6);
   else if(page==Page::Tracks){
     if(trackUiMode==TrackUiMode::List)trackSelection=constrain(trackSelection+delta,0,kTrackCount-1);
-    else if(trackUiMode==TrackUiMode::Actions)trackAction=uint8_t(constrain(int(trackAction)+delta,0,4));
+    else if(trackUiMode==TrackUiMode::Actions){
+      int next=constrain(int(trackAction)+delta,0,4);
+      // Locked tracks cannot be deleted: skip the disabled Delete action.
+      if(trackLocked[selectedTrackId()]&&next==2){
+        next=delta>0?3:1;
+      }
+      trackAction=uint8_t(next);
+    }
     else if(trackUiMode==TrackUiMode::Reorder){
       const int next=constrain(trackSelection+delta,0,kTrackCount-1);
       if(next!=trackSelection){swapTrackDisplayPositions(trackSelection,next,prefs);trackSelection=next;}
@@ -1177,8 +1182,8 @@ void handleWheel(int delta){
     else {
       const int fx=effectsSelection;
       if(effectsField==0){
-        setEffectSlot(fx,constrain(int(effectSlot[fx])+delta,0,3));
-        if(focusSlot(playerFocus)&&effectForSlot(focusSlot(playerFocus))<0){playerFocus=PlayerFocus::Play;playerEditing=false;}
+        pendingEffectSlot=uint8_t(constrain(int(pendingEffectSlot)+delta,0,3));
+        // Do not change live assignments or enabled effects until confirmation.
       }else if(fx==FxEcho){
         if(effectsField==1)echoWet=uint8_t(constrain(int(echoWet)+delta*5,0,100));
         else echoDelayMs=uint16_t(constrain(int(echoDelayMs)+delta*kEchoStepMs,kEchoMinMs,kEchoMaxMs));
@@ -1674,9 +1679,19 @@ void loop(){
     if(M5.BtnA.wasPressed()||scrollShort){
       scrollShort=false;
       const uint8_t lastField=effectLastField(effectsSelection);
-      if(!effectsEditing){effectsEditing=true;effectsField=0;}
-      else if(effectsField<lastField)effectsField++;
-      else {effectsEditing=false;saveEchoSettings();}
+      if(!effectsEditing){effectsEditing=true;effectsField=0;pendingEffectSlot=effectSlot[effectsSelection];}
+      else if(effectsField<lastField){
+        if(effectsField==0){
+          setEffectSlot(effectsSelection,pendingEffectSlot);
+          if(focusSlot(playerFocus)&&effectForSlot(focusSlot(playerFocus))<0){playerFocus=PlayerFocus::Play;playerEditing=false;}
+          saveEchoSettings();
+        }
+        effectsField++;
+      }
+      else {
+        if(effectsField==0){setEffectSlot(effectsSelection,pendingEffectSlot);}
+        effectsEditing=false;saveEchoSettings();
+      }
     }
     scrollLong=false;
   }else if(page==Page::HowTo||page==Page::About){
