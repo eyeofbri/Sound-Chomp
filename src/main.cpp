@@ -795,8 +795,12 @@ void drawPageHeading(const char* name,int symbol){
 // resolution and use the supplied palette color, not raster backgrounds.
 void drawTrackActionIcon(int action,int x,int y,uint16_t c,bool locked){
   switch(action){
-    case 0: // Play: 7px triangle
-      for(int i=0;i<7;i++)canvas.drawFastVLine(x+i,y+abs(3-i),7-2*abs(3-i),c);
+    case 0: // Play: right-facing triangle (flat left edge, pointed right tip)
+      // Draw horizontal runs rather than symmetric vertical bars (which made a diamond).
+      for(int row=0;row<9;row++){
+        const int width=9-2*abs(row-4);
+        canvas.drawFastHLine(x,y+row,width,c);
+      }
       break;
     case 1: // Rename: serif capital T, designed to read at 9px
       canvas.drawFastHLine(x,y,9,c);
@@ -832,6 +836,17 @@ void drawTrackActionIcon(int action,int x,int y,uint16_t c,bool locked){
 void drawTracks(){
   const int w=canvas.width(),h=canvas.height();const bool portrait=h>w;
   drawPageHeading("TRACKS",1);
+  if(trackUiMode==TrackUiMode::Actions){
+    static const char* const kTrackActionLabels[]={"SELECT","EDIT","DELETE","LOCK","MOVE"};
+    const char* actionLabel=kTrackActionLabels[min(int(trackAction),4)];
+    const int labelW=int(strlen(actionLabel))*6;
+    // Label sits opposite the heading and beneath the top-right battery.
+    // A dark inset maintains contrast with any primary palette color.
+    const int labelX=w-7-labelW;
+    canvas.fillRect(labelX-2,23,labelW+4,11,BG);
+    canvas.setTextSize(1);canvas.setTextColor(palette().warning,BG);
+    canvas.setCursor(labelX,25);canvas.print(actionLabel);
+  }
   const int rowH=portrait?40:19;
   const int firstY=portrait?40:39;
   const int actionWidth=portrait?15:14;
@@ -875,7 +890,8 @@ void drawTracks(){
       canvas.drawRect(ax,ay,actionWidth,ah,actionColor);
       const int ix=ax+(actionWidth-9)/2;
       const int iy=ay+(ah-9)/2;
-      drawTrackActionIcon(a,ix,iy,disabled?MUTED:(focused?palette().warning:WHITE),trackLocked[id]);
+      const uint16_t iconColor = disabled ? MUTED : ((a==3 && trackLocked[id]) ? palette().active : (focused ? palette().warning : WHITE));
+      drawTrackActionIcon(a,ix,iy,iconColor,trackLocked[id]);
     }
   }
   if(trackUiMode==TrackUiMode::DeletePrompt||trackUiMode==TrackUiMode::Rename||trackUiMode==TrackUiMode::Reorder){
@@ -890,9 +906,11 @@ void drawTracks(){
     canvas.setCursor(mx+6,my+7);canvas.print(trackUiMode==TrackUiMode::DeletePrompt?"DELETE TRACK?":trackUiMode==TrackUiMode::Reorder?"MOVE TRACK":"RENAME TRACK");
     canvas.setTextColor(WHITE,BG);
     if(trackUiMode==TrackUiMode::Reorder){
-      canvas.setCursor(mx+6,my+24);canvas.print("TURN: MOVE");
-      canvas.setCursor(mx+6,my+39);canvas.print("CLICK: SET");
-      canvas.setCursor(mx+6,my+51);canvas.print("B: DONE");
+      // Position is the live one-based *display* order, not the physical file ID.
+      canvas.setCursor(mx+6,my+21);canvas.print("POSITION: ");canvas.print(trackSelection+1);
+      canvas.setCursor(mx+6,my+32);canvas.print("TURN: MOVE");
+      canvas.setCursor(mx+6,my+43);canvas.print("CLICK: SET");
+      canvas.setCursor(mx+6,my+53);canvas.print("B: DONE");
     }else if(trackUiMode==TrackUiMode::DeletePrompt){
       canvas.setCursor(mx+6,my+23);canvas.print(trackNames[selectedTrackId()]);
       canvas.setCursor(mx+6,my+42);canvas.print("B: NO");
