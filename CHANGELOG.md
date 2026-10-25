@@ -1,3 +1,13 @@
+## Phase 5K — Storage & persistence (development)
+- Protect LittleFS on mount failure by disabling automatic format.
+- Preflight free space before replacing a recording.
+- Write/checksum staged recordings and keep a backup during replacement.
+- Recover valid staged/backup recordings after interrupted commits.
+- Validate stored clips on load without deleting invalid files.
+- Store track order and locks in one validated NVS record; migrate legacy keys.
+- Preserve four-track partition and PCM recording format.
+- See `PHASE_5K_NOTES.md` for limitations and hardware tests.
+
 ## Phase 5J (development)
 - Introduce track-list actions, on-device 10-character display-name editing and safe hold-to-delete modal.
 - Persist names in NVS Preferences separately from LittleFS audio files.

@@ -1,3 +1,5 @@
+> **Current development build: Phase 5K.** Storage safety and crash-recovery changes; read [Phase 5K notes](PHASE_5K_NOTES.md) before flashing. This build has not been tested on hardware. No automatic filesystem formatting; if storage fails to mount, recording is disabled.
+
 > **Phase 5H.2:** Select CLASSIC, MINIMAL, or ARCADE under Settings → SKIN. USB user skin uploads are deferred. See [built-in skin instructions](docs/phase5h2-built-in-skins.md).
 
 > **Phase 5E development candidate:** Non-destructive FX-2 Stutter and FX-3 Robot, plus an audible FX-1 Echo tail after one-shot playback. See [Phase 5E tests](docs/phase5e-audio-effects.md). Not yet physically verified.

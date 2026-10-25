@@ -174,13 +174,50 @@ uint8_t trackOrder[kTrackCount]={0,1,2,3}; // display positions only; PCM file I
 uint8_t renameFocus=0; // CHAR / BACKSPACE / SAVE / CANCEL
 bool renameCharacterEditing=false;
 int selectedTrackId(){return int(trackOrder[trackSelection]);}
-void saveTrackOrganization(Preferences& preferences){
+// Atomic NVS blob for locks and display order (with legacy-key migration).
+struct TrackOrganizationRecord {
+  uint8_t version;
+  uint8_t order[kTrackCount];
+  uint8_t locks[kTrackCount];
+  uint8_t check;
+};
+constexpr uint8_t kTrackOrgVersion=1;
+uint8_t trackOrganizationCheck(const TrackOrganizationRecord& record){
+  uint8_t value=0xA7 ^ record.version;
+  for(int i=0;i<kTrackCount;i++)value=uint8_t((value*33u)^record.order[i]);
+  for(int i=0;i<kTrackCount;i++)value=uint8_t((value*33u)^record.locks[i]);
+  return value;
+}
+bool validTrackOrganization(const TrackOrganizationRecord& record){
+  if(record.version!=kTrackOrgVersion||record.check!=trackOrganizationCheck(record))return false;
+  bool seen[kTrackCount]{};
   for(int i=0;i<kTrackCount;i++){
-    char key[14];snprintf(key,sizeof key,"trkLock%d",i);preferences.putBool(key,trackLocked[i]);
-    snprintf(key,sizeof key,"trkOrd%d",i);preferences.putUChar(key,trackOrder[i]);
+    if(record.order[i]>=kTrackCount||seen[record.order[i]]||record.locks[i]>1)return false;
+    seen[record.order[i]]=true;
   }
+  return true;
+}
+void saveTrackOrganization(Preferences& preferences){
+  TrackOrganizationRecord record{};
+  record.version=kTrackOrgVersion;
+  for(int i=0;i<kTrackCount;i++){
+    record.order[i]=trackOrder[i];record.locks[i]=trackLocked[i]?1:0;
+  }
+  record.check=trackOrganizationCheck(record);
+  if(preferences.putBytes("trkOrgV1",&record,sizeof(record))!=sizeof(record))
+    Serial.println("Storage: failed to persist track locks/order");
 }
 void loadTrackOrganization(Preferences& preferences){
+  TrackOrganizationRecord record{};
+  if(preferences.getBytesLength("trkOrgV1")==sizeof(record) &&
+     preferences.getBytes("trkOrgV1",&record,sizeof(record))==sizeof(record) &&
+     validTrackOrganization(record)){
+    for(int i=0;i<kTrackCount;i++){
+      trackOrder[i]=record.order[i];trackLocked[i]=record.locks[i]!=0;
+    }
+    return;
+  }
+  // Older firmware stored each value under a separate Preferences key.
   bool seen[kTrackCount]{};bool valid=true;
   for(int i=0;i<kTrackCount;i++){
     char key[14];snprintf(key,sizeof key,"trkLock%d",i);trackLocked[i]=preferences.getBool(key,false);
@@ -188,7 +225,11 @@ void loadTrackOrganization(Preferences& preferences){
     if(trackOrder[i]>=kTrackCount)valid=false;
     else if(seen[trackOrder[i]])valid=false;else seen[trackOrder[i]]=true;
   }
-  if(!valid)for(int i=0;i<kTrackCount;i++)trackOrder[i]=i;
+  if(!valid){
+    Serial.println("Storage: invalid track order; reverting to default display order");
+    for(int i=0;i<kTrackCount;i++)trackOrder[i]=i;
+  }
+  saveTrackOrganization(preferences);
 }
 void swapTrackDisplayPositions(int first,int second,Preferences& preferences){
   if(first<0||second<0||first>=kTrackCount||second>=kTrackCount)return;
@@ -234,52 +275,131 @@ bool writeAll(File& f,const uint8_t* src,size_t n){
   while(n){size_t written=f.write(src,min(n,size_t(4096)));if(!written)return false;src+=written;n-=written;}
   return true;
 }
+// 5K: Validate the exact on-flash bytes, not just the file length.
+// Reading in chunks avoids allocating a second full-sized audio buffer.
+bool validateStoredClip(const char* path){
+  File file=LittleFS.open(path,"r");
+  if(!file)return false;
+  ClipHeader hdr{};
+  bool ok=file.read(reinterpret_cast<uint8_t*>(&hdr),sizeof hdr)==sizeof hdr &&
+      hdr.magic==kClipMagic && hdr.version==kClipVersion && hdr.sampleRate==kSampleRate &&
+      hdr.sampleCount<=kMaxSamples &&
+      file.size()==sizeof hdr+size_t(hdr.sampleCount)*sizeof(int16_t);
+  uint32_t hash=2166136261u;
+  uint8_t buffer[512];
+  size_t remaining=ok?size_t(hdr.sampleCount)*sizeof(int16_t):0;
+  while(ok&&remaining){
+    const size_t count=min(remaining,sizeof buffer);
+    if(file.read(buffer,count)!=count){ok=false;break;}
+    for(size_t i=0;i<count;i++){hash^=buffer[i];hash*=16777619u;}
+    remaining-=count;
+  }
+  if(ok)ok=hash==hdr.checksum;
+  file.close();return ok;
+}
+void backupTrackPath(int which,char* out,size_t n){
+  snprintf(out,n,"/chomp%02d.bak",which+1);
+}
+// Recover interrupted replacement transactions before loading any PCM.
+// Prefer the new destination if valid, then the prior backup, then a staged temp.
+void recoverTrackFiles(){
+  if(!storageReady)return;
+  for(int i=0;i<kTrackCount;i++){
+    char dest[24],tmp[24],bak[24];
+    trackPath(i,dest,sizeof dest);trackPath(i,tmp,sizeof tmp,true);
+    backupTrackPath(i,bak,sizeof bak);
+    if(validateStoredClip(dest)){
+      // The committed destination is valid; leftovers belong to an old transaction.
+      LittleFS.remove(tmp);LittleFS.remove(bak);continue;
+    }
+    if(LittleFS.exists(dest)){
+      // Do not silently delete an invalid clip: leave it for offline recovery.
+      Serial.printf("Storage: invalid clip %d; recovery attempted\n",i+1);
+    }
+    if(validateStoredClip(bak)){
+      if(LittleFS.exists(dest))LittleFS.remove(dest);
+      if(LittleFS.rename(bak,dest))Serial.printf("Storage: restored backup for track %d\n",i+1);
+      else Serial.printf("Storage: BACKUP RESTORE FAILED for track %d\n",i+1);
+    }else if(!LittleFS.exists(dest)&&validateStoredClip(tmp)){
+      if(LittleFS.rename(tmp,dest))Serial.printf("Storage: recovered staged track %d\n",i+1);
+    }
+    // Leave invalid files in place for troubleshooting; never autoformat.
+  }
+}
 bool saveTrack(int which){
   if(!storageReady||which<0||which>=kTrackCount||!tracks[which].pcm)return false;
-  char dest[24],tmp[24];trackPath(which,dest,sizeof dest);trackPath(which,tmp,sizeof tmp,true);
-  LittleFS.remove(tmp);
+  char dest[24],tmp[24],bak[24];
+  trackPath(which,dest,sizeof dest);trackPath(which,tmp,sizeof tmp,true);
+  backupTrackPath(which,bak,sizeof bak);
+  const Track& t=tracks[which];
+  if(t.length>kMaxSamples)return false;
+  // A staged write needs free space in addition to the currently saved clip.
+  const size_t required=sizeof(ClipHeader)+t.length*sizeof(int16_t);
+  const size_t total=LittleFS.totalBytes(),used=LittleFS.usedBytes();
+  if(used>total || total-used<required+4096){
+    Serial.printf("Storage: insufficient free space for track %d (%u needed, %u free)\n",
+      which+1,unsigned(required+4096),unsigned(used<=total?total-used:0));return false;
+  }
+  if(!LittleFS.remove(tmp)&&LittleFS.exists(tmp)){
+    Serial.println("Storage: cannot clear stale temporary clip");return false;
+  }
   File f=LittleFS.open(tmp,"w");
   if(!f){Serial.println("Storage: cannot create temporary clip");return false;}
-  const Track& t=tracks[which];
   ClipHeader hdr{kClipMagic,kClipVersion,kSampleRate,uint32_t(t.length),clipChecksum(t.pcm,t.length)};
   bool ok=writeAll(f,reinterpret_cast<const uint8_t*>(&hdr),sizeof hdr);
   if(ok&&t.length)ok=writeAll(f,reinterpret_cast<const uint8_t*>(t.pcm),t.length*sizeof(int16_t));
   f.flush();f.close();
-  File verify=LittleFS.open(tmp,"r");
-  ok=ok&&verify&&verify.size()==sizeof hdr+t.length*sizeof(int16_t);
-  if(verify)verify.close();
-  if(!ok){LittleFS.remove(tmp);Serial.println("Storage: failed to write clip");return false;}
-  // Keep the prior recording until the replacement was written completely.
-  // Filesystem rename over an existing destination varies by implementation.
-  LittleFS.remove(dest);
-  if(!LittleFS.rename(tmp,dest)){Serial.println("Storage: rename failed");return false;}
+  if(!ok||!validateStoredClip(tmp)){
+    LittleFS.remove(tmp);Serial.println("Storage: staged clip verification failed");return false;
+  }
+  // The prior destination is moved to a backup, never removed before commit.
+  // Recover any older transaction before starting a new one.
+  if(LittleFS.exists(bak)){
+    Serial.println("Storage: outstanding backup; refusing replacement");return false;
+  }
+  const bool hadPrevious=LittleFS.exists(dest);
+  if(hadPrevious&&!LittleFS.rename(dest,bak)){
+    Serial.println("Storage: cannot back up previous clip");return false;
+  }
+  if(!LittleFS.rename(tmp,dest)){
+    Serial.println("Storage: commit rename failed");
+    if(hadPrevious && !LittleFS.rename(bak,dest))
+      Serial.println("Storage: critical: previous clip remains in .bak");
+    return false;
+  }
+  if(hadPrevious&&!LittleFS.remove(bak))Serial.println("Storage: cleanup of old backup deferred");
   Serial.printf("Saved track %d, %u samples\n",which+1,unsigned(t.length));
   return true;
 }
-void deleteSavedTrack(int which){
-  if(!storageReady)return;char dest[24],tmp[24];
+bool deleteSavedTrack(int which){
+  if(!storageReady)return false;
+  char dest[24],tmp[24],bak[24];
   trackPath(which,dest,sizeof dest);trackPath(which,tmp,sizeof tmp,true);
-  LittleFS.remove(dest);LittleFS.remove(tmp);
+  backupTrackPath(which,bak,sizeof bak);
+  // Remove backup first so boot recovery cannot resurrect a deleted recording.
+  if(LittleFS.exists(bak)&&!LittleFS.remove(bak))return false;
+  if(LittleFS.exists(tmp)&&!LittleFS.remove(tmp))return false;
+  return !LittleFS.exists(dest)||LittleFS.remove(dest);
 }
 void loadTracks(){
   if(!storageReady)return;
   for(int i=0;i<kTrackCount;i++){
     char path[24];trackPath(i,path,sizeof path);
+    if(!validateStoredClip(path)){
+      tracks[i].length=0;
+      if(LittleFS.exists(path))Serial.printf("Storage: track %d is invalid, file retained\n",i+1);
+      continue;
+    }
     File f=LittleFS.open(path,"r");
-    if(!f)continue;
     ClipHeader hdr{};
-    const bool headerOK=f.read(reinterpret_cast<uint8_t*>(&hdr),sizeof hdr)==sizeof hdr &&
-       hdr.magic==kClipMagic && hdr.version==kClipVersion &&
-       hdr.sampleRate==kSampleRate && hdr.sampleCount<=kMaxSamples &&
-       f.size()==sizeof hdr+size_t(hdr.sampleCount)*sizeof(int16_t) && tracks[i].pcm;
-    bool ok=headerOK;
-    if(ok){
+    bool ok=f&&f.read(reinterpret_cast<uint8_t*>(&hdr),sizeof hdr)==sizeof hdr;
+    if(ok&&tracks[i].pcm){
       const size_t bytes=size_t(hdr.sampleCount)*sizeof(int16_t);
       ok=f.read(reinterpret_cast<uint8_t*>(tracks[i].pcm),bytes)==bytes;
-      if(ok)ok=clipChecksum(tracks[i].pcm,hdr.sampleCount)==hdr.checksum;
-    }
-    tracks[i].length=ok?hdr.sampleCount:0;f.close();
-    Serial.printf("Load track %d: %s\n",i+1,ok?"OK":"invalid / skipped");
+    }else ok=false;
+    tracks[i].length=ok?hdr.sampleCount:0;
+    if(f)f.close();
+    Serial.printf("Load track %d: %s\n",i+1,ok?"OK":"read failure");
   }
 }
 
@@ -1266,6 +1386,22 @@ void recordClip(){
     limitFlashUntil=millis()+650;
     return;
   }
+  // Guard the previous in-RAM recording: require enough free flash to stage
+  // a full 8-second take before recording over this slot. Never format here.
+  if(storageReady){
+    const size_t total=LittleFS.totalBytes(),used=LittleFS.usedBytes();
+    const size_t needed=sizeof(ClipHeader)+kMaxSamples*sizeof(int16_t)+4096;
+    if(used>total||total-used<needed){
+      Serial.printf("Record blocked: insufficient flash for safe replacement (%u free, %u needed)\n",
+        unsigned(used<=total?total-used:0),unsigned(needed));
+      storageSaveFailed=true;limitFlashUntil=millis()+900;
+      return;
+    }
+  }else{
+    Serial.println("Record blocked: LittleFS unavailable (prevents unsaved recording)");
+    storageSaveFailed=true;limitFlashUntil=millis()+900;
+    return;
+  }
   captured=0;tracks[activeTrack].length=0;tapePosition=0.0f;M5.Speaker.end();
   if(!M5.Mic.begin()){state=State::Error;errorText="MIC BEGIN FAILED";return;}
   state=State::Recording;setStateLed();clearEvents();draw(true);
@@ -1561,8 +1697,8 @@ void setup(){
   // The existing 8 MB partition scheme reserves the final ~1.5 MB for a filesystem.
   // WARNING: format-on-failure initializes an unformatted filesystem on first use.
   // It can erase pre-existing incompatible filesystem data in that partition.
-  storageReady=LittleFS.begin(true);
-  if(storageReady){loadTracks();captured=tracks[activeTrack].length;}
+  storageReady=LittleFS.begin(false);
+  if(storageReady){recoverTrackFiles();loadTracks();captured=tracks[activeTrack].length;}
   else Serial.println("LittleFS mount failed: RAM-only operation; no persistent storage");
   for(auto& b:playChunks)b=static_cast<int16_t*>(heap_caps_malloc(kPlayChunk*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
   echoHistory=static_cast<int16_t*>(heap_caps_calloc(kEchoBufferSamples,sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
@@ -1642,8 +1778,11 @@ void loop(){
       // Requiring a HOLD rather than a tap prevents accidental deletions.
       if(hold){
         const int id=selectedTrackId();
-        if(!trackLocked[id]){tracks[id].length=0;deleteSavedTrack(id);
-          if(id==activeTrack){captured=0;updateWaveform();}}
+        if(!trackLocked[id]){
+          if(deleteSavedTrack(id)){tracks[id].length=0;
+            if(id==activeTrack){captured=0;updateWaveform();}
+          }else Serial.printf("Storage: delete failed for track %d; recording retained\n",id+1);
+        }
         trackUiMode=TrackUiMode::List;
       }
     }else if(trackUiMode==TrackUiMode::Reorder){
