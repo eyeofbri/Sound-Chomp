@@ -42,7 +42,7 @@ constexpr size_t kStutterCapacity=kSampleRate*400/1000;
 int16_t* stutterHistory=nullptr;
 size_t stutterPos=0, stutterFilled=0;
 uint32_t effectSampleClock=0;
-constexpr const char* kFirmwareVersion="v0.8.0-dev (5K.1)";
+constexpr const char* kFirmwareVersion="v0.8.0-dev (5K.3)";
 // Fixed library, user-assignable FX slots (0=UNUSED, 1..3=player buttons).
 enum EffectId:uint8_t {FxEcho=0,FxStutter,FxRobot,FxWarble,FxBitcrush,FxTelephone,FxCount};
 constexpr const char* kEffectNames[FxCount]={"ECHO","STUTTER","ROBOT","WARBLE","BITCRUSH","TELEPHONE"};
@@ -1647,23 +1647,45 @@ void playClip(){
   if(state!=State::Error)state=State::Idle;
   setStateLed();clearEvents();draw(true);
 }
+// A single orientation decision, shared by startup and normal operation.
+// A noisy or sideways reading leaves the current rotation unchanged.
+bool readAutoRotation(uint8_t fallback,uint8_t& result){
+  result=fallback;
+  if(!M5.Imu.update())return false;
+  const auto data=M5.Imu.getImuData();
+  const float x=data.accel.x,y=data.accel.y;
+  if(fabsf(x)>fabsf(y)*1.40f && fabsf(x)>0.55f){result=x>0?1:3;return true;}
+  if(fabsf(y)>fabsf(x)*1.40f && fabsf(y)>0.55f){result=y>0?0:2;return true;}
+  return false;
+}
+uint8_t chooseStartupRotation(){
+  if(orientationMode==OrientationMode::Landscape)return 1;
+  if(orientationMode==OrientationMode::Portrait)return portraitRotation;
+  // Sample during initialization, BEFORE allocating or drawing the splash.
+  // Requiring repeated agreement reduces wrong orientation due to hand motion.
+  uint8_t counts[4]={0,0,0,0};
+  constexpr int kStartupSamples=12;
+  for(int i=0;i<kStartupSamples;i++){
+    uint8_t candidate=1;
+    if(readAutoRotation(1,candidate) && counts[candidate]<255)++counts[candidate];
+    delay(18);
+  }
+  uint8_t winner=1;int high=0,runnerUp=0;
+  for(uint8_t r=0;r<4;r++){
+    const int count=counts[r];
+    if(count>high){runnerUp=high;high=count;winner=r;}
+    else if(count>runnerUp)runnerUp=count;
+  }
+  // Ambiguous/no IMU readings use the established landscape fallback.
+  return (high>=3 && high>=runnerUp+2)?winner:1;
+}
 void updateOrientation(){
   if(state!=State::Idle || page==Page::Charge)return;
   const uint32_t now=millis();
   if(now-lastOrientationPoll<350)return;
   lastOrientationPoll=now;
-  uint8_t desired=orientationMode==OrientationMode::Portrait?0:1;
-  if(orientationMode==OrientationMode::Auto){
-    // M5Unified IMU is optional; hold last orientation if unavailable.
-    if(M5.Imu.update()){
-      auto data=M5.Imu.getImuData();
-      const float x=data.accel.x,y=data.accel.y;
-      // StickS3 physical axes: X-dominant is landscape; Y-dominant portrait.
-      if(fabsf(x)>fabsf(y)*1.40f && fabsf(x)>0.55f)desired=x>0?1:3;
-      else if(fabsf(y)>fabsf(x)*1.40f && fabsf(y)>0.55f)desired=y>0?0:2;
-      else desired=displayRotation;
-    }else desired=displayRotation;
-  }
+  uint8_t desired=orientationMode==OrientationMode::Portrait?portraitRotation:1;
+  if(orientationMode==OrientationMode::Auto)readAutoRotation(displayRotation,desired);
   if(desired!=orientationCandidate){orientationCandidate=desired;orientationStableAt=now;}
   if(desired==displayRotation||now-orientationStableAt<650)return;
   displayRotation=desired;
@@ -1718,7 +1740,7 @@ void splash(){
 } // namespace
 
 void setup(){
-  Serial.begin(115200);M5.begin(M5.config());M5.Display.setRotation(1);displayRotation=1;orientationCandidate=1;
+  Serial.begin(115200);M5.begin(M5.config());
   M5.Power.setExtOutput(true);Wire.begin(kGroveSda,kGroveScl);Wire.setClock(100000);
   prefs.begin("soundchomp",false);
   // Drop the obsolete USB-mode flag if an earlier prototype left it set.
@@ -1730,6 +1752,14 @@ void setup(){
   orientationMode=static_cast<OrientationMode>(constrain(int(prefs.getUChar("orientation",0)),0,2));
   themeSelection=uint8_t(constrain(int(prefs.getUChar("theme",0)),0,2));
   skinSelection=uint8_t(constrain(int(prefs.getUChar("skin",0)),0,2));
+  // Apply the saved manual or sampled AUTO rotation before any splash pixels.
+  displayRotation=chooseStartupRotation();
+  orientationCandidate=displayRotation;
+  orientationStableAt=millis();
+  lastOrientationPoll=millis();
+  M5.Display.setRotation(displayRotation);
+  Serial.printf("Splash orientation: %u (%s)\n",unsigned(displayRotation),
+      orientationMode==OrientationMode::Auto?"AUTO":orientationMode==OrientationMode::Portrait?"PORTRAIT":"LANDSCAPE");
   echoEnabled=prefs.getBool("echoOn",false);
   echoWet=uint8_t(constrain(int(prefs.getUChar("echoWet",35)),0,100));
   echoDelayMs=uint16_t(constrain(int(prefs.getUShort("echoDelay",250)),kEchoMinMs,kEchoMaxMs));
@@ -1779,7 +1809,7 @@ void setup(){
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();scrollAwaitRelease=scrollConnected;
   setStateLed();updateWaveform();updateBattery();
-  Serial.println("Sound-Chomp Phase 5K.2 - recording safety and release readiness");splash();draw(true);
+  Serial.println("Sound-Chomp Phase 5K.3 - splash orientation and documentation organization");splash();draw(true);
 }
 void loop(){
   service();

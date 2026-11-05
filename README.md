@@ -45,7 +45,7 @@ Six available effects: **Echo, Stutter, Robot, Warble, Bitcrush, Telephone**. As
 
 ### Skins and palettes
 
-**Settings → SKIN:** CLASSIC / MINIMAL / ARCADE. **Settings → PALETTE:** GREEN / RED / BLUE. Both persist. Skin artwork uses fixed PNG sprite coordinates; yellow borders are editor-only, magenta is the primary icon color key, and green shades in backgrounds change with palette. The Sound-Chomp teeth logo is firmware-owned. See [skin customization](docs/phase5h2-built-in-skins.md).
+**Settings → SKIN:** CLASSIC / MINIMAL / ARCADE. **Settings → PALETTE:** GREEN / RED / BLUE. Both persist. Skin artwork uses fixed PNG sprite coordinates; yellow borders are editor-only, magenta is the primary icon color key, and green shades in backgrounds change with palette. The Sound-Chomp teeth logo is firmware-owned. See [skin customization](Phase Notes/phase5h2-built-in-skins.md).
 
 ## Troubleshooting
 
@@ -58,6 +58,6 @@ Six available effects: **Echo, Stutter, Robot, Warble, Bitcrush, Telephone**. As
 ## Development and contributions
 
 - Source: [GitHub repository](https://github.com/eyeofbri/Sound-Chomp)
-- [Current setup guide](docs/getting-started.md) · [Contributor guide](CONTRIBUTING.md) · [Phase 5K.2 verification plan](PHASE_5K2_NOTES.md)
-- Historical phase documentation is preserved in `docs/` but **is not** current setup guidance.
+- [Current setup guide](docs/getting-started.md) · [Contributor guide](CONTRIBUTING.md) · [Phase 5K.3 verification plan](Phase%20Notes/PHASE_5K3_NOTES.md)
+- Historical phase documentation is preserved in `Phase Notes/` but **is not** current setup guidance.
 - License: [MIT](LICENSE).
