@@ -1,34 +1,19 @@
-# Getting started
+# Getting started — current Sound-Chomp firmware
 
-## Prerequisites
-- VS Code + PlatformIO IDE extension
-- USB-C **data** cable
-- StickS3 and Unit Scroll U186 attached to the Grove connector
+This guide applies to **Phase 5K.2**. The older phase notes in `docs/` are development history.
 
-## Build and upload
-From PlatformIO's toolbar use Build, Upload and Monitor. Or in a terminal with PlatformIO CLI installed:
+1. Connect **Unit Scroll U186** to the M5StickS3 Grove connector with the matching HY2.0 cable. Use a USB-C data cable for the board.
+2. Install VS Code and PlatformIO, then open the `Sound-Chomp/` directory.
+3. Build for `m5stack-sticks3`; upload via PlatformIO. The port is autodetected when supported, otherwise select the correct port manually.
+4. The display should start in the Sound-Chomp player, with a theme-colored header and reel animation. **B** toggles the menu. The old Scroll: FOUND diagnostic screen is no longer part of current firmware.
+5. Hold **A** on the player to capture audio; release to stop. Tap **A** to play. Use **Tracks** to rename, lock, reorder, or delete recordings. Use **Effects** to map six effects to three player FX slots. Use **Settings** for skin/palette and player preferences.
 
-```sh
-pio run -e m5stack-sticks3
-pio run -e m5stack-sticks3 -t upload
-pio device monitor -b 115200
-```
+**Avoid** Erase Flash / Upload Filesystem Image / changing partitions if recordings already exist. LittleFS won't automatically format on a mount failure, and recording is disabled if persistent storage cannot be safely accessed.
 
-**Expected:** the screen displays `SOUND-CHOMP`, a `Scroll: FOUND` indicator, wheel count that changes when scrolled, and a button indicator that reads `DOWN` when the wheel is pressed. Built-in Btn A and B states are shown too. Scroll LED should be dim green and turn red while pressed.
+## Quick troubleshooting
 
-## Troubleshooting
-- **Upload fails:** check that your USB cable supports data; try another port. Consult StickS3 documentation for download mode (hold side reset until internal green LED flashes).
-- **Unit Scroll not found:** check the Grove cable and Unit Scroll model; check device's external 5V power setting; the code uses SDA GPIO9/SCL GPIO10 and address `0x40`.
-- **Blank display or compilation errors:** capture full PlatformIO logs and open an issue; StickS3 uses vendor-specific integration and must not be built as an older StickC.
-- **Serial output missing:** reopen the monitor at 115200 after uploading.
-
-This initial project hasn't been physically verified. Please report your build log and on-device results before publishing `v0.1.0`.
-
-## Windows build dependency troubleshooting
-If you see `ModuleNotFoundError: No module named intelhex`, in PowerShell run:
-
-```powershell
-& "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" -m pip install intelhex
-```
-
-Rebuild. If needed, clean the PlatformIO project and rebuild.
+- If the upload port isn't found, check your USB-C **data** cable and PlatformIO serial device list. Windows COM numbers vary.
+- If the wheel doesn't respond, verify the Unit Scroll model, Grove connection, and 5V power. See `hardware.md`.
+- If recording is blocked, check whether the track is locked and look for storage/PSRAM messages at **115200 baud**.
+- If PlatformIO reports a missing `intelhex` Python module on Windows, install it into PlatformIO's Python environment, not necessarily system Python: `& "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" -m pip install intelhex`.
+- For bug reports attach build logs, exact device details, and reproduction steps. Avoid uploading private recordings to public issues.

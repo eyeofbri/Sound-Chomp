@@ -42,7 +42,7 @@ constexpr size_t kStutterCapacity=kSampleRate*400/1000;
 int16_t* stutterHistory=nullptr;
 size_t stutterPos=0, stutterFilled=0;
 uint32_t effectSampleClock=0;
-constexpr const char* kFirmwareVersion="v0.8.0-dev (5J.2)";
+constexpr const char* kFirmwareVersion="v0.8.0-dev (5K.1)";
 // Fixed library, user-assignable FX slots (0=UNUSED, 1..3=player buttons).
 enum EffectId:uint8_t {FxEcho=0,FxStutter,FxRobot,FxWarble,FxBitcrush,FxTelephone,FxCount};
 constexpr const char* kEffectNames[FxCount]={"ECHO","STUTTER","ROBOT","WARBLE","BITCRUSH","TELEPHONE"};
@@ -406,12 +406,14 @@ void loadTracks(){
 int16_t *samples=nullptr,*playChunks[kPlayBuffers]={};
 size_t captured=0;
 void commitActiveTrack(){tracks[activeTrack].length=captured;}
-bool selectTrack(int which);
+bool selectTrack(int which,bool savePreference=true);
 uint8_t waveform[kWaveBins]={};
 float spectrum[kBands]={};
 M5Canvas canvas(&M5.Display);
 Preferences prefs;
 bool canvasReady=false,scrollConnected=false,scrollDown=false,scrollShort=false,scrollLong=false,scrollLongHandled=false;
+// After an I2C reconnect, require the wheel button to be released before accepting clicks.
+bool scrollAwaitRelease=false;
 int32_t wheelLast=0;
 uint32_t lastPoll=0,lastProbe=0,lastFrame=0,pressedAt=0,lastBatteryPoll=0;
 uint8_t volumePct=65,brightnessPct=80,batteryPct=0;
@@ -448,13 +450,16 @@ static constexpr UiTheme kThemes[]={
 const UiTheme& palette(){return kThemes[constrain(int(themeSelection),0,2)];}
 uint16_t themeAccent(){return palette().primary;}
 uint16_t accent(){return speed()<0?palette().secondary:palette().primary;}
-bool selectTrack(int which){
-  if(which<0||which>=kTrackCount)return false;
+bool selectTrack(int which,bool savePreference){
+  if(which<0||which>=kTrackCount||!tracks[which].pcm)return false;
   if(activeTrack==which)return true;
   commitActiveTrack();
   activeTrack=which;samples=tracks[which].pcm;captured=tracks[which].length;
-  tapePosition=0.0f;persistActiveTrack();
-  return samples!=nullptr;
+  tapePosition=0.0f;
+  // Writing NVS during the audio hot loop can stall the output queue.
+  // Loop-All passes false and persists the selected track once playback stops.
+  if(savePreference)persistActiveTrack();
+  return true;
 }
 
 
@@ -1335,20 +1340,38 @@ void updateScroll(){
   uint32_t now=millis();if(now-lastPoll<kPollMs)return;lastPoll=now;
   if(!scrollConnected){
     if(now-lastProbe<1000)return;lastProbe=now;scrollConnected=probeScroll();
-    if(scrollConnected){uint8_t v[4];if(readReg(kEncoderReg,v,4)){
-      uint32_t n=uint32_t(v[0])|(uint32_t(v[1])<<8)|(uint32_t(v[2])<<16)|(uint32_t(v[3])<<24);
-      wheelLast=int32_t(n);
-    }setStateLed();}return;
+    if(scrollConnected){
+      uint8_t v[4];
+      if(readReg(kEncoderReg,v,4)){
+        uint32_t n=uint32_t(v[0])|(uint32_t(v[1])<<8)|(uint32_t(v[2])<<16)|(uint32_t(v[3])<<24);
+        wheelLast=int32_t(n);
+      }
+      scrollAwaitRelease=true;
+      scrollDown=false;scrollShort=false;scrollLong=false;scrollLongHandled=false;
+      setStateLed();
+    }
+    return;
   }
   uint8_t v[4],button=1;
   if(!readReg(kEncoderReg,v,4)||!readReg(kButtonReg,&button,1)){
-    scrollConnected=false;scrollDown=false;Serial.println("Scroll disconnected");return;
+    scrollConnected=false;scrollAwaitRelease=true;scrollDown=false;
+    scrollShort=false;scrollLong=false;scrollLongHandled=false;
+    Serial.println("Scroll disconnected");return;
   }
   uint32_t bits=uint32_t(v[0])|(uint32_t(v[1])<<8)|(uint32_t(v[2])<<16)|(uint32_t(v[3])<<24);
   int32_t pos=int32_t(bits);
-  if(pos!=wheelLast){int32_t d=pos-wheelLast;if(d>-32&&d<32)handleWheel(int(d));}
+  // Unsigned subtraction handles the encoder's signed 32-bit rollover
+  // without undefined signed-overflow behavior. Treat large jumps as resets.
+  const uint32_t change=uint32_t(pos)-uint32_t(wheelLast);
+  const int32_t delta=int32_t(change);
+  if(delta>-32&&delta<32&&delta!=0)handleWheel(int(delta));
   wheelLast=pos;
   bool down=button==0;
+  if(scrollAwaitRelease){
+    if(!down)scrollAwaitRelease=false;
+    scrollDown=false;scrollShort=false;scrollLong=false;
+    return;
+  }
   if(down&&!scrollDown){pressedAt=now;scrollLongHandled=false;}
   if(down&&!scrollLongHandled&&now-pressedAt>=kLongPressMs){scrollLong=true;scrollLongHandled=true;}
   if(!down&&scrollDown&&!scrollLongHandled)scrollShort=true;
@@ -1386,41 +1409,77 @@ void recordClip(){
     limitFlashUntil=millis()+650;
     return;
   }
-  // Guard the previous in-RAM recording: require enough free flash to stage
-  // a full 8-second take before recording over this slot. Never format here.
-  if(storageReady){
-    const size_t total=LittleFS.totalBytes(),used=LittleFS.usedBytes();
-    const size_t needed=sizeof(ClipHeader)+kMaxSamples*sizeof(int16_t)+4096;
-    if(used>total||total-used<needed){
-      Serial.printf("Record blocked: insufficient flash for safe replacement (%u free, %u needed)\n",
-        unsigned(used<=total?total-used:0),unsigned(needed));
-      storageSaveFailed=true;limitFlashUntil=millis()+900;
-      return;
-    }
-  }else{
-    Serial.println("Record blocked: LittleFS unavailable (prevents unsaved recording)");
-    storageSaveFailed=true;limitFlashUntil=millis()+900;
-    return;
+  // Do not touch the current PCM until a new capture is safely committed.
+  if(!storageReady){
+    Serial.println("Record blocked: persistent storage unavailable");
+    storageSaveFailed=true;limitFlashUntil=millis()+900;return;
   }
-  captured=0;tracks[activeTrack].length=0;tapePosition=0.0f;M5.Speaker.end();
-  if(!M5.Mic.begin()){state=State::Error;errorText="MIC BEGIN FAILED";return;}
+  const size_t total=LittleFS.totalBytes(),used=LittleFS.usedBytes();
+  const size_t needed=sizeof(ClipHeader)+kMaxSamples*sizeof(int16_t)+4096;
+  if(used>total||total-used<needed){
+    Serial.printf("Record blocked: insufficient flash (%u free, %u needed)\n",
+      unsigned(used<=total?total-used:0),unsigned(needed));
+    storageSaveFailed=true;limitFlashUntil=millis()+900;return;
+  }
+  // An extra 256 KiB PSRAM capture buffer is only held during recording.
+  // Failure to allocate must never destroy the previous take.
+  int16_t* staged=static_cast<int16_t*>(heap_caps_malloc(kMaxSamples*sizeof(int16_t),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+  if(!staged){
+    Serial.println("Record blocked: no PSRAM for safe temporary capture");
+    storageSaveFailed=true;limitFlashUntil=millis()+900;return;
+  }
+  const int16_t* previousSamples=samples;
+  const size_t previousLength=captured;
+  const float previousTape=tapePosition;
+  size_t newCount=0;
+  bool captureError=false;
+  M5.Speaker.end();
+  if(!M5.Mic.begin()){
+    free(staged);state=State::Error;errorText="MIC BEGIN FAILED";return;
+  }
   state=State::Recording;setStateLed();clearEvents();draw(true);
-  while(captured<kMaxSamples){
+  while(newCount<kMaxSamples){
     if(!M5.BtnA.isPressed()||M5.BtnB.wasPressed())break;
-    size_t count=min(kRecordChunk,kMaxSamples-captured);
-    if(!M5.Mic.record(samples+captured,count,kSampleRate)){
-      state=State::Error;errorText="MIC RECORD FAILED";break;
+    const size_t count=min(kRecordChunk,kMaxSamples-newCount);
+    if(!M5.Mic.record(staged+newCount,count,kSampleRate)){
+      captureError=true;break;
     }
     while(M5.Mic.isRecording()){service();draw();delay(1);}
-    captured+=count;tapePosition=float(captured)/float(kMaxSamples);analyze(samples,captured,captured-count/2);service();draw();
+    newCount+=count;tapePosition=float(newCount)/float(kMaxSamples);
+    analyze(staged,newCount,newCount-count/2);service();draw();
   }
-  M5.Mic.end();commitActiveTrack();updateWaveform();if(resetSpeedAfterRecord)resetSpeed();if(state!=State::Error)state=State::Idle;
-  if(state==State::Idle){
-    if(storageReady){storageSaveFailed=!saveTrack(activeTrack);if(storageSaveFailed)Serial.println("WARNING: Clip only in RAM; flash save failed");}
-    else Serial.println("WARNING: flash not mounted; recording only in RAM");
+  M5.Mic.end();
+  bool saved=false;
+  if(!captureError&&newCount>0){
+    // Temporarily expose the new PCM to the existing transaction writer.
+    // Roll back both the pointer and length if save fails.
+    tracks[activeTrack].pcm=staged;
+    tracks[activeTrack].length=newCount;
+    saved=saveTrack(activeTrack);
+    if(saved){
+      free(const_cast<int16_t*>(previousSamples));
+      samples=staged;captured=newCount;
+      tapePosition=0.0f;storageSaveFailed=false;
+      if(resetSpeedAfterRecord)resetSpeed();
+      updateWaveform();
+    }else{
+      tracks[activeTrack].pcm=const_cast<int16_t*>(previousSamples);
+      tracks[activeTrack].length=previousLength;
+      Serial.println("Recording save failed: previous take preserved");
+    }
+  }else{
+    Serial.println(captureError?"Recording aborted: microphone failed; previous take preserved":
+      "Recording discarded: no audio captured; previous take preserved");
   }
+  if(!saved){
+    samples=const_cast<int16_t*>(previousSamples);
+    captured=previousLength;tapePosition=previousTape;
+    free(staged);storageSaveFailed=true; // No new recording was committed; do not auto-play the old take.
+    if(captureError){state=State::Error;errorText="MIC RECORD FAILED";}
+    else state=State::Idle;
+  }else state=State::Idle;
   setStateLed();clearEvents();draw(true);
-  Serial.printf("Captured %.2fs\n",double(captured)/kSampleRate);
+  Serial.printf("Recording %s: %.2fs\n",saved?"saved":"not committed",double(newCount)/kSampleRate);
 }
 // Generate output from the original PCM at the selected signed speed.
 // IMPORTANT: keep a queue of audio ahead of the speaker, and do not modify
@@ -1452,15 +1511,20 @@ void playClip(){
   for(auto* b:playChunks)if(!b)return;
   M5.Mic.end();
   resetPlaybackEffects();
-  if(!M5.Speaker.begin()){state=State::Error;errorText="SPEAKER BEGIN FAILED";return;}
+  advanceAfterPlayback=false; // Never carry a previous long-click request to a new session.
+  if(!M5.Speaker.begin()){
+    M5.Speaker.end();state=State::Error;errorText="SPEAKER BEGIN FAILED";
+    Serial.println(errorText);setStateLed();return;
+  }
   setVolume();
   // On the first playback after power-up, give the speaker/amp a brief period
   // to stabilize BEFORE advancing the source cursor. This mitigates reports
   // of missing attack transients without dropping or modifying PCM samples.
   static bool firstSpeakerStart=true;
   const bool primeSpeakerOnThisPlay=firstSpeakerStart;
-  if(firstSpeakerStart){delay(60);firstSpeakerStart=false;}
+  if(primeSpeakerOnThisPlay)delay(60);
   state=State::Playing;setStateLed();clearEvents();draw(true);
+  const int trackAtPlaybackStart=activeTrack;
   double cursor=speed()<0?double(captured-1):0.0;
   tapePosition=captured?float(cursor)/float(captured):0.0f;
   playbackSeconds=0.0f;
@@ -1480,7 +1544,8 @@ void playClip(){
     memset(playChunks[0],0,kPrerollSamples*sizeof(int16_t));
     if(!M5.Speaker.playRaw(playChunks[0],kPrerollSamples,kSampleRate,false,1,kChannel,false)){
       state=State::Error;errorText="SPEAKER PREROLL FAILED";
-    }else queued=1;
+      Serial.println(errorText);
+    }else{queued=1;firstSpeakerStart=false;}
   }
   while(!interrupted&&state==State::Playing){
     service();
@@ -1527,7 +1592,7 @@ void playClip(){
             if(next<0){sourceExhausted=true;break;}
             // The queued speaker audio may trail this UI switch by a small
             // buffer; the playback source itself remains continuous.
-            if(!selectTrack(next)){sourceExhausted=true;break;}
+            if(!selectTrack(next,false)){sourceExhausted=true;break;}
             updateWaveform();
           }
           cursor=rate<0?double(captured-1):0.0;
@@ -1575,6 +1640,9 @@ void playClip(){
     delay(1);
   }
   M5.Speaker.stop();M5.Speaker.end();
+  // Persist Loop-All's current track outside of the real-time render loop.
+  // These writes are deferred even when playback is stopped by B / PLAY.
+  if(activeTrack!=trackAtPlaybackStart)persistActiveTrack();
   if(advanceAfterPlayback){advanceAfterPlayback=false;nextRecordedTrack();}
   if(state!=State::Error)state=State::Idle;
   setStateLed();clearEvents();draw(true);
@@ -1695,8 +1763,7 @@ void setup(){
   for(int i=0;i<kTrackCount;i++)if(trackOrder[i]==activeTrack){trackSelection=i;break;}
   samples=tracks[activeTrack].pcm;
   // The existing 8 MB partition scheme reserves the final ~1.5 MB for a filesystem.
-  // WARNING: format-on-failure initializes an unformatted filesystem on first use.
-  // It can erase pre-existing incompatible filesystem data in that partition.
+  // Never format automatically: incompatible or unmounted storage must remain intact.
   storageReady=LittleFS.begin(false);
   if(storageReady){recoverTrackFiles();loadTracks();captured=tracks[activeTrack].length;}
   else Serial.println("LittleFS mount failed: RAM-only operation; no persistent storage");
@@ -1710,8 +1777,9 @@ void setup(){
   canvas.setColorDepth(16);
   canvasReady=canvas.createSprite(M5.Display.width(),M5.Display.height())!=nullptr;
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
-  scrollConnected=probeScroll();setStateLed();updateWaveform();updateBattery();
-  Serial.println("Sound-Chomp Phase 5H.2 - built-in skins");splash();draw(true);
+  scrollConnected=probeScroll();scrollAwaitRelease=scrollConnected;
+  setStateLed();updateWaveform();updateBattery();
+  Serial.println("Sound-Chomp Phase 5K.2 - recording safety and release readiness");splash();draw(true);
 }
 void loop(){
   service();
@@ -1733,7 +1801,7 @@ void loop(){
     if(down&&!aHoldStarted&&millis()-aPressedAt>=kRecordHoldMs){
       aHoldStarted=true;
       recordClip(); // blocking capture loop; release stops it
-      if(autoPlay&&state==State::Idle&&captured>0)playClip();
+      if(autoPlay&&state==State::Idle&&!storageSaveFailed&&captured>0)playClip();
     }
     if(!down&&aWasDown&&!aHoldStarted&&millis()-aPressedAt<kRecordHoldMs&&state==State::Idle){
       playClip();
