@@ -1,6 +1,6 @@
 # Getting started — current Sound-Chomp firmware
 
-This guide applies to **Phase 5K.3**. The older phase notes in `../Phase Notes/` are development history.
+This guide applies to **v0.8.0-rc.1** (based on Phase 5K.3). The older phase notes in `../Phase Notes/` are development history.
 
 1. Connect **Unit Scroll U186** to the M5StickS3 Grove connector with the matching HY2.0 cable. Use a USB-C data cable for the board.
 2. Install VS Code and PlatformIO, then open the `Sound-Chomp/` directory.

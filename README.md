@@ -2,7 +2,7 @@
 
 A pocket-sized, Yak Bak-inspired audio recorder for **M5Stack M5StickS3 + Unit Scroll**, with four persistent recordings, adjustable forward/reverse playback, six assignable effects, and three built-in skins.
 
-**Stable release:** v0.7.1 · **Development:** Phase 5K.2 (v0.8.0 release candidate work; not hardware certified).
+**Stable public release:** v0.7.1 · **Release candidate:** v0.8.0-rc.1 (based on hardware-tested Phase 5K.3; release-package verification pending).
 
 ## Hardware
 
@@ -11,6 +11,8 @@ A pocket-sized, Yak Bak-inspired audio recorder for **M5Stack M5StickS3 + Unit S
 - USB-C **data** cable, VS Code with PlatformIO
 
 See [hardware connections](docs/hardware.md). No additional external components are required.
+
+**Release candidate:** Start with the [release and upgrade guide](docs/releasing.md), including how to protect existing recordings. This project does not yet provide an audio-export workflow.
 
 ## Build and upload
 
@@ -21,6 +23,8 @@ See [hardware connections](docs/hardware.md). No additional external components 
 5. If upload fails, choose the correct serial port in PlatformIO's device list. Public `platformio.ini` intentionally does not hardcode `COM9`.
 
 CLI equivalent: `pio run -e m5stack-sticks3` then `pio run -e m5stack-sticks3 -t upload`.
+
+**Downloads:** The release source ZIP is a full PlatformIO project. GitHub Actions can also produce a *firmware binaries* ZIP (for advanced flashing workflows); it is not a one-click updater. See [release guide](docs/releasing.md).
 
 **Protect your saved audio:** do **not** run **Erase Flash**, **Upload Filesystem Image**, or repartition the flash as part of a normal update. The firmware does not automatically format LittleFS when mounting fails. If storage is unavailable, recording is blocked. Keep valuable takes backed up by other means; the device does not include a recording export feature.
 
@@ -45,7 +49,7 @@ Six available effects: **Echo, Stutter, Robot, Warble, Bitcrush, Telephone**. As
 
 ### Skins and palettes
 
-**Settings → SKIN:** CLASSIC / MINIMAL / ARCADE. **Settings → PALETTE:** GREEN / RED / BLUE. Both persist. Skin artwork uses fixed PNG sprite coordinates; yellow borders are editor-only, magenta is the primary icon color key, and green shades in backgrounds change with palette. The Sound-Chomp teeth logo is firmware-owned. See [skin customization](Phase Notes/phase5h2-built-in-skins.md).
+**Settings → SKIN:** CLASSIC / MINIMAL / ARCADE. **Settings → PALETTE:** GREEN / RED / BLUE. Both persist. Skin artwork uses fixed PNG sprite coordinates; yellow borders are editor-only, magenta is the primary icon color key, and green shades in backgrounds change with palette. The Sound-Chomp teeth logo is firmware-owned. See [skin customization](Phase%20Notes/phase5h2-built-in-skins.md).
 
 ## Troubleshooting
 
@@ -58,6 +62,6 @@ Six available effects: **Echo, Stutter, Robot, Warble, Bitcrush, Telephone**. As
 ## Development and contributions
 
 - Source: [GitHub repository](https://github.com/eyeofbri/Sound-Chomp)
-- [Current setup guide](docs/getting-started.md) · [Contributor guide](CONTRIBUTING.md) · [Phase 5K.3 verification plan](Phase%20Notes/PHASE_5K3_NOTES.md)
+- [Current setup guide](docs/getting-started.md) · [Release guide](docs/releasing.md) · [RC release notes](docs/release-notes-v0.8.0-rc.1.md) · [Contributor guide](CONTRIBUTING.md) · [Phase 5K.3 verification plan](Phase%20Notes/PHASE_5K3_NOTES.md)
 - Historical phase documentation is preserved in `Phase Notes/` but **is not** current setup guidance.
 - License: [MIT](LICENSE).

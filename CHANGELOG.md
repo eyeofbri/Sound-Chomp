@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.8.0-rc.1 — Release candidate (Phase 5K.4)
+- Package hardware-tested Phase 5K.3 behavior without changes to audio/storage algorithms.
+- Synchronize firmware/About version, setup documentation, and release instructions.
+- Add a release checklist, repeatable source/firmware ZIP packaging, and GitHub Actions artifact builds.
+- No partition changes or recording-format migration; power-loss recovery remains unverified on device.
+
 ## Unreleased — Phase 5K.3 (v0.8.0 development)
 - Initialize device orientation before the startup splash and canvas creation.
 - Sample accelerometer in AUTO with fallback for ambiguous readings.

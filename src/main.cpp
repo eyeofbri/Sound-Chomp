@@ -42,7 +42,7 @@ constexpr size_t kStutterCapacity=kSampleRate*400/1000;
 int16_t* stutterHistory=nullptr;
 size_t stutterPos=0, stutterFilled=0;
 uint32_t effectSampleClock=0;
-constexpr const char* kFirmwareVersion="v0.8.0-dev (5K.3)";
+constexpr const char* kFirmwareVersion="v0.8.0-rc.1";
 // Fixed library, user-assignable FX slots (0=UNUSED, 1..3=player buttons).
 enum EffectId:uint8_t {FxEcho=0,FxStutter,FxRobot,FxWarble,FxBitcrush,FxTelephone,FxCount};
 constexpr const char* kEffectNames[FxCount]={"ECHO","STUTTER","ROBOT","WARBLE","BITCRUSH","TELEPHONE"};
@@ -1809,7 +1809,7 @@ void setup(){
   if(!canvasReady){M5.Display.fillScreen(TFT_BLACK);M5.Display.drawString("CANVAS FAILED",4,4);}
   scrollConnected=probeScroll();scrollAwaitRelease=scrollConnected;
   setStateLed();updateWaveform();updateBattery();
-  Serial.println("Sound-Chomp Phase 5K.3 - splash orientation and documentation organization");splash();draw(true);
+  Serial.print("Sound-Chomp ");Serial.println(kFirmwareVersion);splash();draw(true);
 }
 void loop(){
   service();
